@@ -163,17 +163,20 @@ export const exportBenchLayoutWordDoc = async ({
     });
 
     // 3. Summary Table Data Calculation
-    const deptGroups: { [deptId: number]: string[] } = {};
+    const deptGroups: { [deptId: string]: string[] } = {};
     for (let r = 0; r < hall.rows; r++) {
         for (let c = 0; c < hall.columns; c++) {
             for (let s = 0; s < hall.seatsPerBench; s++) {
                 const seatIndex = c * hall.seatsPerBench + s;
                 const seat = seats[r]?.[seatIndex];
                 if (seat?.rollNumber && seat.departmentId !== undefined) {
-                    if (!deptGroups[seat.departmentId]) {
-                        deptGroups[seat.departmentId] = [];
+                    const deptKey = String(seat.departmentId);
+                    if (!deptGroups[deptKey]) {
+                        deptGroups[deptKey] = [];
                     }
-                    deptGroups[seat.departmentId].push(seat.rollNumber);
+                    if (!deptGroups[deptKey].includes(seat.rollNumber)) {
+                        deptGroups[deptKey].push(seat.rollNumber);
+                    }
                 }
             }
         }
@@ -198,12 +201,12 @@ export const exportBenchLayoutWordDoc = async ({
     Object.keys(deptGroups).forEach((deptIdStr) => {
         const deptId = parseInt(deptIdStr);
         // Find department by matching both id (number) and _id (string from MongoDB)
-        const dept = departments.find((d) => 
-          d.id === deptId || 
-          String(d._id || d.id) === deptIdStr ||
-          String(d._id || d.id) === String(deptId)
+        const dept = departments.find((d) =>
+            d.id === deptId ||
+            String(d._id || d.id) === deptIdStr ||
+            String(d._id || d.id) === String(deptId)
         );
-        const rollNumbers = deptGroups[deptId].sort((a, b) => {
+        const rollNumbers = (deptGroups[deptIdStr] || []).sort((a, b) => {
             const numA = parseInt(a.replace(/\D/g, ''));
             const numB = parseInt(b.replace(/\D/g, ''));
             if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
@@ -410,11 +413,11 @@ export const exportBenchLayoutWordDoc = async ({
     // 6. Generate Blob
     try {
         const blob = await Packer.toBlob(doc);
-        
+
         if (!blob || blob.size < 300) {
             throw new Error("Generated document is too small or invalid");
         }
-        
+
         const currentDate = new Date().toLocaleDateString("en-IN").replace(/\//g, "-");
         const filename = `${hall.name}-seating-arrangement-${currentDate}.docx`;
 

@@ -129,7 +129,15 @@ const FacultyDashboard = () => {
       doc.setFontSize(10);
       doc.text("Note: Seating arrangement is managed by the Examination Cell.", 14, finalY + 15);
 
-      doc.save(`faculty-hall-assignment-${user.name.replace(/\s+/g, '-')}-${currentDate.replace(/\//g, '-')}.pdf`);
+      const fileNameDate = new Date().toLocaleString('en-IN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).replace(/[\/\,:\s]+/g, '-');
+
+      doc.save(`faculty-hall-assignment-${user.name.replace(/\s+/g, '-')}-${fileNameDate}.pdf`);
 
       toast({
         title: "PDF Exported",

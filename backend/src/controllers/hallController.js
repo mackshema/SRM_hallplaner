@@ -13,29 +13,29 @@ export const createHall = async (req, res) => {
 
     // Validate required fields
     if (!name || !rows || !columns || !seatsPerBench || !floor) {
-      return res.status(400).json({ 
-        message: "Missing required fields: name, rows, columns, seatsPerBench, floor" 
+      return res.status(400).json({
+        message: "Missing required fields: name, rows, columns, seatsPerBench, floor"
       });
     }
 
     // Validate numeric fields
-    if (typeof rows !== 'number' || rows < 1 || 
-        typeof columns !== 'number' || columns < 1 ||
-        typeof seatsPerBench !== 'number' || seatsPerBench < 1) {
-      return res.status(400).json({ 
-        message: "rows, columns, and seatsPerBench must be positive numbers" 
+    if (typeof rows !== 'number' || rows < 1 ||
+      typeof columns !== 'number' || columns < 1 ||
+      typeof seatsPerBench !== 'number' || seatsPerBench < 1) {
+      return res.status(400).json({
+        message: "rows, columns, and seatsPerBench must be positive numbers"
       });
     }
 
     // Validate facultyAssigned is an array
     if (!Array.isArray(facultyAssigned)) {
-      return res.status(400).json({ 
-        message: "facultyAssigned must be an array" 
+      return res.status(400).json({
+        message: "facultyAssigned must be an array"
       });
     }
 
     // Ensure facultyAssigned is array of strings
-    const normalizedFacultyAssigned = Array.isArray(facultyAssigned) 
+    const normalizedFacultyAssigned = Array.isArray(facultyAssigned)
       ? facultyAssigned.map(f => String(f))
       : [];
 
@@ -51,32 +51,32 @@ export const createHall = async (req, res) => {
     res.status(201).json(hall);
   } catch (error) {
     console.error("Create Hall Error:", error);
-    
+
     // Handle MongoDB validation errors
     if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Validation error",
         error: Object.values(error.errors).map(e => e.message).join(', ')
       });
     }
-    
+
     // Handle duplicate key errors
     if (error.code === 11000) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Hall with this name already exists"
       });
     }
-    
+
     // Handle CastError (invalid ObjectId, etc.)
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Invalid data format",
         error: error.message
       });
     }
-    
+
     // Generic error handler - ensure we always return a response
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Failed to create hall",
       error: error.message || "Unknown error occurred"
     });
@@ -154,6 +154,45 @@ export const assignFacultyToHall = async (req, res) => {
     res.json(hall);
   } catch (error) {
     console.error("Assign faculty error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/* ===============================
+   UPDATE HALL
+================================ */
+export const updateHall = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      rows,
+      columns,
+      seatsPerBench,
+      floor,
+      facultyAssigned,
+    } = req.body;
+
+    const hall = await Hall.findById(id);
+    if (!hall) {
+      return res.status(404).json({ message: "Hall not found" });
+    }
+
+    hall.name = name || hall.name;
+    hall.rows = rows || hall.rows;
+    hall.columns = columns || hall.columns;
+    hall.seatsPerBench = seatsPerBench || hall.seatsPerBench;
+    hall.floor = floor || hall.floor;
+    if (facultyAssigned !== undefined) {
+      hall.facultyAssigned = Array.isArray(facultyAssigned)
+        ? facultyAssigned.map(f => String(f))
+        : [];
+    }
+
+    const updatedHall = await hall.save();
+    res.json(updatedHall);
+  } catch (error) {
+    console.error("Update hall error:", error);
     res.status(500).json({ error: error.message });
   }
 };

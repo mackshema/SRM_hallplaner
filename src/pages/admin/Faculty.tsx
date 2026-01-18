@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { db, Hall, User } from "@/lib/db";
 import { toast } from "@/components/ui/use-toast";
-import { FileDown } from "lucide-react";
+import { FileDown, Pencil, Eye } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -30,11 +30,21 @@ const FacultyManagement = () => {
   const [faculty, setFaculty] = useState<User[]>([]);
   const [halls, setHalls] = useState<Hall[]>([]);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
+
+  // Dialog States
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isViewOpen, setIsViewOpen] = useState(false);
+
+  // Selection State
+  const [selectedFaculty, setSelectedFaculty] = useState<User | null>(null);
+
+  // Form Data
   const [formData, setFormData] = useState({
     name: "",
     department: "",
   });
+
   const [settings, setSettings] = useState({
     institutionName: "",
     institutionSubtitle: "",
@@ -70,10 +80,13 @@ const FacultyManagement = () => {
   }, []);
 
   // Function to get assigned halls for each faculty member
-  const getAssignedHalls = (facultyId: number): Hall[] => {
-    return halls.filter(hall =>
-      hall.facultyAssigned && hall.facultyAssigned.includes(String(facultyId))
-    );
+  const getAssignedHalls = (member: User): Hall[] => {
+    return halls.filter(hall => {
+      if (!hall.facultyAssigned || hall.facultyAssigned.length === 0) return false;
+      // Check both id and _id if available
+      return (member.id && hall.facultyAssigned.includes(String(member.id))) ||
+        (member._id && hall.facultyAssigned.includes(member._id));
+    });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,7 +129,7 @@ const FacultyManagement = () => {
       });
 
       setFormData({ name: "", department: "" });
-      setOpen(false);
+      setIsAddOpen(false);
     } catch (error) {
       console.error("Error adding faculty:", error);
       toast({
@@ -127,10 +140,56 @@ const FacultyManagement = () => {
     }
   };
 
-  const handleDeleteFaculty = async (facultyId: number) => {
+
+
+  const handleEditClick = (member: User) => {
+    setSelectedFaculty(member);
+    setFormData({
+      name: member.name,
+      department: member.department || "",
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleUpdateFaculty = async () => {
+    if (!selectedFaculty) return;
+
+    try {
+      const id = selectedFaculty.id || selectedFaculty._id;
+      if (!id) return;
+
+      const updatedUser = await db.updateFaculty(id, {
+        name: formData.name,
+        department: formData.department
+      });
+
+      setFaculty(faculty.map(f => (f.id === id || f._id === id) ? { ...f, ...updatedUser } : f));
+
+      toast({
+        title: "Faculty Updated",
+        description: "Faculty details updated successfully."
+      });
+      setIsEditOpen(false);
+      setSelectedFaculty(null);
+    } catch (error) {
+      console.error("Error updating faculty:", error);
+      toast({
+        title: "Update Failed",
+        description: "Failed to update faculty details.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleViewClick = (member: User) => {
+    setSelectedFaculty(member);
+    setIsViewOpen(true);
+  };
+
+  const handleDeleteFaculty = async (facultyId: number | string) => {
     try {
       await db.deleteFaculty(facultyId);
-      setFaculty(faculty.filter(f => f.id !== facultyId));
+      setFaculty(faculty.filter(f => f.id !== facultyId && f._id !== facultyId));
 
       toast({
         title: "Faculty Deleted",
@@ -185,11 +244,11 @@ const FacultyManagement = () => {
       doc.text(`Generated on: ${currentDateTime}`, pageWidth - 14, 65, { align: "right" });
 
       const tableData = faculty.map(member => {
-        const assignedHalls = getAssignedHalls(member.id);
+        const assignedHalls = getAssignedHalls(member);
         const hallNames = assignedHalls.length > 0
           ? assignedHalls.map(h => {
             // Find hall in allHalls to get exam metadata
-            const fullHall = allHalls.find((ah: any) => ah._id === h._id || ah.name === h.name);
+            const fullHall = halls.find((ah: any) => ah._id === h._id || ah.name === h.name);
             const examInfo = fullHall && (fullHall.examDate || fullHall.examSession || fullHall.examTime)
               ? ` (${fullHall.examDate || ""} ${fullHall.examSession || ""} ${fullHall.examTime || ""})`
               : "";
@@ -245,9 +304,9 @@ const FacultyManagement = () => {
             Export Allocation
           </Button>
 
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
-              <Button>Add Faculty</Button>
+              <Button onClick={() => setFormData({ name: "", department: "" })}>Add Faculty</Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -286,10 +345,97 @@ const FacultyManagement = () => {
                 )}
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)}>
+                <Button variant="outline" onClick={() => setIsAddOpen(false)}>
                   Cancel
                 </Button>
                 <Button onClick={handleAddFaculty}>Add Faculty</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Edit Faculty Dialog */}
+          <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Edit Faculty</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-name">Faculty Name</Label>
+                  <Input
+                    id="edit-name"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-department">Department</Label>
+                  <Input
+                    id="edit-department"
+                    name="department"
+                    value={formData.department}
+                    onChange={handleInputChange}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
+                <Button onClick={handleUpdateFaculty}>Update Faculty</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* View Faculty Dialog */}
+          <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Faculty Details</DialogTitle>
+              </DialogHeader>
+              {selectedFaculty && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-muted-foreground">Name</Label>
+                      <p className="font-medium">{selectedFaculty.name}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Department</Label>
+                      <p className="font-medium">{selectedFaculty.department || "N/A"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Username</Label>
+                      <p className="font-medium font-mono bg-slate-100 p-1 rounded">{selectedFaculty.username}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Password</Label>
+                      <p className="font-medium font-mono bg-slate-100 p-1 rounded">
+                        {selectedFaculty.password || "Hidden"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-muted-foreground mb-2 block">Assigned Halls</Label>
+                    <div className="bg-slate-50 p-3 rounded-md border text-sm max-h-40 overflow-y-auto">
+                      {getAssignedHalls(selectedFaculty).length > 0 ? (
+                        <ul className="list-disc pl-5 space-y-1">
+                          {getAssignedHalls(selectedFaculty).map(h => (
+                            <li key={h._id}>
+                              <span className="font-semibold">{h.name}</span>
+                              {h.examDate && <span className="text-xs text-muted-foreground ml-2">({h.examDate} - {h.examSession})</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-muted-foreground italic">No halls assigned</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button onClick={() => setIsViewOpen(false)}>Close</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -321,9 +467,9 @@ const FacultyManagement = () => {
                   <TableCell>{member.department || "N/A"}</TableCell>
                   <TableCell>{member.username}</TableCell>
                   <TableCell>
-                    {getAssignedHalls(member.id).length > 0 ? (
+                    {getAssignedHalls(member).length > 0 ? (
                       <ul className="list-disc pl-5">
-                        {getAssignedHalls(member.id).map(hall => (
+                        {getAssignedHalls(member).map(hall => (
                           <li key={hall._id}>{hall.name}</li>
                         ))}
                       </ul>
@@ -332,13 +478,31 @@ const FacultyManagement = () => {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDeleteFaculty(member.id)}
-                    >
-                      Delete
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleViewClick(member)}
+                        title="View Details"
+                      >
+                        <Eye className="h-4 w-4 text-blue-600" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleEditClick(member)}
+                        title="Edit Faculty"
+                      >
+                        <Pencil className="h-4 w-4 text-orange-600" />
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDeleteFaculty(member.id || member._id || "")}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

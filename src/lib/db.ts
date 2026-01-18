@@ -118,6 +118,16 @@ class DatabaseService {
     return res.ok;
   }
 
+  async updateFaculty(id: number | string, data: Partial<User>): Promise<User> {
+    const res = await fetch(`${this.apiUrl}/users/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error("Failed to update faculty");
+    return await res.json();
+  }
+
   async getFacultyAssignedHalls(facultyId: number | string) {
     try {
       const res = await fetch(`${this.apiUrl}/seating/faculty/${facultyId}`);
