@@ -9,6 +9,7 @@ export const createHall = async (req, res) => {
       seatsPerBench,
       floor,
       facultyAssigned = [],
+      extraBenches = []
     } = req.body;
 
     // Validate required fields
@@ -46,6 +47,7 @@ export const createHall = async (req, res) => {
       seatsPerBench,
       floor,
       facultyAssigned: normalizedFacultyAssigned,
+      extraBenches
     });
 
     res.status(201).json(hall);
@@ -171,6 +173,7 @@ export const updateHall = async (req, res) => {
       seatsPerBench,
       floor,
       facultyAssigned,
+      extraBenches
     } = req.body;
 
     const hall = await Hall.findById(id);
@@ -187,6 +190,9 @@ export const updateHall = async (req, res) => {
       hall.facultyAssigned = Array.isArray(facultyAssigned)
         ? facultyAssigned.map(f => String(f))
         : [];
+    }
+    if (extraBenches !== undefined) {
+      hall.extraBenches = extraBenches;
     }
 
     const updatedHall = await hall.save();

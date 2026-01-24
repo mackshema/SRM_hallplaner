@@ -26,6 +26,13 @@ export interface Hall {
   rows: number;
   columns: number;
   seatsPerBench: number;
+  extraBenches?: {
+    id: string;
+    row: number;
+    column: number;
+    offsetX?: number;
+    offsetY?: number;
+  }[];
 
   floor?: string;
   facultyAssigned?: string[];
@@ -43,6 +50,7 @@ export interface SeatAssignment {
   benchPosition: number;
   studentRollNumber: string;
   departmentId: number | string; // Can be string ID from MongoDB
+  isExtraBench?: boolean;
   examDate?: string;
   examSession?: string;
   examTime?: string;

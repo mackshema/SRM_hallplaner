@@ -15,6 +15,7 @@ const seatAssignmentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Department",
     },
+    isExtraBench: { type: Boolean, default: false }, // 🔥 NEW FLAG
 
     examDate: String,
     examSession: String,

@@ -34,6 +34,7 @@ export interface HeaderSettings {
 interface ExportBenchLayoutWordOptions {
     hall: Hall;
     seats: StudentSeat[][];
+    seatAssignments?: any[]; // Allow passing raw assignments for full coverage
     departments: Department[];
     examDate: string;
     examSession: string;
@@ -44,6 +45,7 @@ interface ExportBenchLayoutWordOptions {
 export const exportBenchLayoutWordDoc = async ({
     hall,
     seats,
+    seatAssignments,
     departments,
     examDate,
     examSession,
@@ -261,27 +263,58 @@ export const exportBenchLayoutWordDoc = async ({
     });
 
     // 4. Seating Layout Grid
-    // Calculate grid
-    const seatGrid: string[][] = Array(hall.rows)
-        .fill(null)
-        .map(() => Array(hall.columns * hall.seatsPerBench).fill(""));
+    let seatGrid: string[][];
+    let maxRow = hall.rows;
+    let maxCol = hall.columns * hall.seatsPerBench; // Approx columns
 
-    for (let r = 0; r < hall.rows; r++) {
-        for (let c = 0; c < hall.columns * hall.seatsPerBench; c++) {
-            const seat = seats[r]?.[c];
-            if (seat?.rollNumber) {
-                seatGrid[r][c] = seat.rollNumber;
+    // If we have raw seat assignments, use them to expand the grid beyond hall.rows/cols (e.g. extra benches)
+    if (seatAssignments && seatAssignments.length > 0) {
+        // Find max row and max column from assignments
+        seatAssignments.forEach(a => {
+            if (a.row > maxRow) maxRow = a.row;
+            // Column for grid is roughly (col-1)*seatsPerBench + (benchPosition-1)
+            // But wait, export logic treats columns as distinct entities.
+            // Let's ensure we cover all positions.
+            const gridCol = (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
+            if (gridCol >= maxCol) maxCol = gridCol + 1;
+        });
+    }
+
+    // Initialize grid with dynamic size
+    seatGrid = Array(maxRow)
+        .fill(null)
+        .map(() => Array(maxCol).fill(""));
+
+    // Populate grid
+    if (seatAssignments && seatAssignments.length > 0) {
+        // Use assignments as source of truth
+        seatAssignments.forEach(a => {
+            const r = a.row - 1;
+            const c = (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
+            if (r >= 0 && c >= 0 && a.studentRollNumber) {
+                // Ensure array bounds (just in case)
+                if (!seatGrid[r]) seatGrid[r] = Array(maxCol).fill("");
+                seatGrid[r][c] = a.studentRollNumber;
+            }
+        });
+    } else {
+        // Fallback: Use 'seats' 2D array (legacy/regular grid only)
+        for (let r = 0; r < hall.rows; r++) {
+            for (let c = 0; c < hall.columns * hall.seatsPerBench; c++) {
+                const seat = seats[r]?.[c];
+                if (seat?.rollNumber) {
+                    seatGrid[r][c] = seat.rollNumber;
+                }
             }
         }
     }
 
     // Identify non-empty columns
-    const totalColumns = hall.columns * hall.seatsPerBench;
     const nonEmptyColumns: number[] = [];
-    for (let c = 0; c < totalColumns; c++) {
+    for (let c = 0; c < maxCol; c++) {
         let hasStudent = false;
-        for (let r = 0; r < hall.rows; r++) {
-            if (seatGrid[r][c]) {
+        for (let r = 0; r < maxRow; r++) {
+            if (seatGrid[r] && seatGrid[r][c]) {
                 hasStudent = true;
                 break;
             }
@@ -314,7 +347,7 @@ export const exportBenchLayoutWordDoc = async ({
     );
 
     // Grid Rows
-    for (let r = 0; r < hall.rows; r++) {
+    for (let r = 0; r < maxRow; r++) {
         const rowCells: TableCell[] = [];
 
         // Row Number Label

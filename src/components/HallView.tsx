@@ -33,6 +33,7 @@ interface StudentSeat {
   rollNumber: string;
   departmentId?: string | number;
   departmentName?: string;
+  isExtraBench?: boolean;
 }
 
 const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
@@ -698,6 +699,7 @@ const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
         await exportBenchLayoutWordDoc({
           hall,
           seats,
+          seatAssignments,
           departments,
           examDate: meta.date,
           examSession: meta.session,
@@ -797,105 +799,241 @@ const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
   };
 
 
-  if (loading) {
-    return <div className="p-8 text-center">Loading hall details...</div>;
-  }
+  // ---------------------------------------------------------------------------
+  // EXTRA BENCHES LOGIC
+  // ---------------------------------------------------------------------------
+  const [extraBenches, setExtraBenches] = useState<NonNullable<Hall['extraBenches']>>([]);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [dragState, setDragState] = useState<{
+    id: string;
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+  } | null>(null);
 
-  if (!hall) {
-    return <div className="p-8 text-center">Hall not found.</div>;
-  }
+  useEffect(() => {
+    if (hall?.extraBenches) {
+      setExtraBenches(hall.extraBenches);
+    }
+  }, [hall]);
+
+  const addExtraBench = () => {
+    if (!hall) return;
+    const newBench = {
+      id: `extra-${Date.now()}`,
+      row: hall.rows + 1, // Default to below
+      column: 1,
+      offsetX: 20, // Default pixel offset
+      offsetY: (hall.rows * 140) + 20 // Approx placing below
+    };
+    setExtraBenches([...extraBenches, newBench]);
+  };
+
+  const removeExtraBench = (id: string) => {
+    // Prevent removing if occupied
+    const benchToRemove = extraBenches.find(b => b.id === id);
+    if (!benchToRemove) return;
+
+    const hasStudent = seatAssignments.some(s =>
+      (s.isExtraBench) &&
+      s.studentRollNumber &&
+      s.row === benchToRemove.row &&
+      s.column === benchToRemove.column
+    );
+
+    if (hasStudent) {
+      toast({ title: "Cannot Remove", description: "This bench has assignments. Clear seating first.", variant: "destructive" });
+      return;
+    }
+    setExtraBenches(extraBenches.filter(b => b.id !== id));
+  };
+
+  const handleMouseDown = (e: React.MouseEvent, benchId: string, currentX: number, currentY: number) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragState({
+      id: benchId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: currentX,
+      startTop: currentY
+    });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragState) return;
+      const dx = e.clientX - dragState.startX;
+      const dy = e.clientY - dragState.startY;
+
+      const newLeft = dragState.startLeft + dx;
+      const newTop = dragState.startTop + dy;
+
+      setExtraBenches(prev => prev.map(b => {
+        if (b.id === dragState.id) {
+          // Snap logic (approximate 100x140 grid)
+          const SNAP_X = 10;
+          const SNAP_Y = 10;
+          return {
+            ...b,
+            offsetX: Math.round(newLeft / SNAP_X) * SNAP_X,
+            offsetY: Math.round(newTop / SNAP_Y) * SNAP_Y,
+            // Calculate virtual row/col for logic
+            row: Math.max(1, Math.round((newTop + 50) / 140)),
+            column: Math.max(1, Math.round((newLeft + 50) / 120))
+          };
+        }
+        return b;
+      }));
+    };
+
+    const handleMouseUp = () => {
+      setDragState(null);
+    };
+
+    if (dragState) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragState]);
+
+  // Update save functionality to include Extra Benches
+  const saveAll = async () => {
+    if (!hall) return;
+
+    // 1. Save Hall Config (Extra Benches)
+    try {
+      await fetch(`http://localhost:5000/api/halls/${hall._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ extraBenches })
+      });
+    } catch (e) {
+      console.error("Failed to save hall config", e);
+      toast({ title: "Error", description: "Failed to save layout configuration", variant: "destructive" });
+      return;
+    }
+
+    // 2. Save Seating
+    await saveSeatingPlan();
+  };
+
+
+  if (loading) return <div className="p-8 text-center">Loading hall details...</div>;
+  if (!hall) return <div className="p-8 text-center">Hall not found.</div>;
 
   return (
     <div className="space-y-6">
-      {/* Exam Info Banner */}
-      <div className="mb-4 rounded-lg border bg-blue-50 p-3 text-sm">
-        <div className="flex justify-between items-center">
-          <div>
-            <strong>Exam:</strong>{" "}
-            {examDate || "Not set"} &nbsp;|&nbsp; {examSession || "Not set"} &nbsp;|&nbsp; {examTime || "Not set"}
-          </div>
-          {hall.facultyAssigned && hall.facultyAssigned.length > 0 && (
-            <div>
-              <strong>Assigned Faculty:</strong> {hall.facultyAssigned.length} faculty member(s)
-            </div>
-          )}
+      <div className="mb-4 rounded-lg border bg-blue-50 p-3 text-sm flex justify-between items-center">
+        <div>
+          <strong>Exam:</strong> {examDate || "Not set"} | {examSession || "Not set"} | {examTime || "Not set"}
         </div>
+        {!readOnly && (
+          <Button onClick={addExtraBench} size="sm" className="bg-green-600 hover:bg-green-700">
+            ➕ Add Extra Bench
+          </Button>
+        )}
       </div>
+
       {!readOnly && (
         <div className="flex gap-2 mb-6 justify-end">
-          <Button variant="outline" onClick={exportConsolidatedWord}>
-            <FileDown className="mr-2 h-4 w-4" />
-            Export Consolidated Plan (Word)
-          </Button>
-          <Button variant="outline" onClick={exportBenchLayoutWord}>
-            <FileDown className="mr-2 h-4 w-4" />
-            Export Bench Layout (Word)
-          </Button>
+          <Button variant="outline" onClick={exportConsolidatedWord}><FileDown className="mr-2 h-4 w-4" /> Consolidated Plan</Button>
+          <Button variant="outline" onClick={exportBenchLayoutWord}><FileDown className="mr-2 h-4 w-4" /> Bench Layout</Button>
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto relative min-h-[600px] border rounded-lg bg-white p-8" ref={containerRef}>
         <h3 className="font-semibold mb-4">{hall.name} - Seating Plan</h3>
-        <div className="border rounded-lg p-4 bg-white">
-          <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${hall.columns}, minmax(100px, 1fr))` }}>
-            {Array.from({ length: hall.columns }).map((_, colIndex) => (
-              <div key={colIndex} className="text-center font-semibold">
-                Column {colIndex + 1}
-              </div>
-            ))}
 
-            {Array.from({ length: hall.rows }).map((_, rowIndex) => (
-              <React.Fragment key={rowIndex}>
-                {Array.from({ length: hall.columns }).map((_, colIndex) => {
-                  const benchStart = colIndex * hall.seatsPerBench;
-
-                  return (
-                    <div
-                      key={`${rowIndex}-${colIndex}`}
-                      className="border rounded-lg p-2 bg-gray-50"
-                    >
-                      {Array.from({ length: hall.seatsPerBench }).map((_, seatIndex) => {
-                        const seatIndexInRow = benchStart + seatIndex;
-                        const seat = seats[rowIndex] && seats[rowIndex][seatIndexInRow];
-
-                        return (
-                          <div
-                            key={`${rowIndex}-${colIndex}-${seatIndex}`}
-                            className={`mb-2 p-2 rounded-md ${seat?.departmentId !== undefined
-                              ? 'bg-white border'
-                              : 'bg-gray-100'}`}
-                          >
-                            <div className="text-xs">Seat {seatIndex + 1}</div>
-                            {seat?.rollNumber ? (
-                              <>
-                                <div className="font-semibold">{seat.rollNumber}</div>
-                                <div className="text-xs text-gray-500">{seat.departmentName}</div>
-                              </>
-                            ) : (
-                              <div className="text-gray-400 italic">Empty</div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-
-                <div key={`row-label-${rowIndex}`} className="col-span-full border-t border-gray-200 mt-2 mb-4" />
-              </React.Fragment>
-            ))}
-          </div>
+        {/* Main Grid */}
+        <div className="grid gap-8" style={{ gridTemplateColumns: `repeat(${hall.columns}, 120px)` }}>
+          {Array.from({ length: hall.rows }).map((_, rowIndex) => (
+            <React.Fragment key={rowIndex}>
+              {Array.from({ length: hall.columns }).map((_, colIndex) => {
+                const benchStart = colIndex * hall.seatsPerBench;
+                return (
+                  <div key={`${rowIndex}-${colIndex}`} className="border rounded-lg p-2 bg-gray-50 w-[120px] h-auto min-h-[100px]">
+                    <div className="text-center text-xs text-gray-400 mb-1">R{rowIndex + 1}-C{colIndex + 1}</div>
+                    {Array.from({ length: hall.seatsPerBench }).map((_, seatIndex) => {
+                      const idx = benchStart + seatIndex;
+                      const seat = seats[rowIndex] && seats[rowIndex][idx];
+                      return (
+                        <div key={seatIndex} className={`mb-1 p-1 text-xs rounded border ${seat?.departmentId ? 'bg-white border-blue-200' : 'bg-gray-100'}`}>
+                          {seat?.rollNumber || "Empty"}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </React.Fragment>
+          ))}
         </div>
+
+        {/* Extra Benches Overlay */}
+        {extraBenches.map((bench) => {
+          // Find students allocated to this extra bench
+          // Note: SeatAssignment needs to match bench.row/column/isExtraBench
+          // But our 'seats' state is a 2D grid. Extra benches might strictly not be in 'seats' 2D array if we use standard logic.
+          // However, for visualization, we should search seatAssignments directly or map 'seats' differently.
+          // Since existing logic maps seatAssignments -> seats[][] based on rows/cols,
+          // 'extra' assignments might be lost if they exceed bounds.
+          // We need to fetch seatAssignments and filter manually for rendering here.
+
+          const benchAssignments = seatAssignments.filter(a => a.isExtraBench && a.row === bench.row && a.column === bench.column);
+
+          // Check draft status (UI only flag)
+          // If isDraft is present and true, show as draft. Otherwise show as saved.
+          // Fallback: checks if it exists in hall.extraBenches for initial load consistency
+          const isDraft = (bench as any).isDraft;
+
+          return (
+            <div
+              key={bench.id}
+              className={`absolute rounded-lg p-2 w-[120px] cursor-move shadow-md z-10 transition-all ${!isDraft
+                ? "border bg-gray-50 border-gray-200"
+                : "border-2 border-dashed border-orange-400 bg-orange-50"
+                }`}
+              style={{
+                left: bench.offsetX ?? 0,
+                top: bench.offsetY ?? 0,
+              }}
+              onMouseDown={(e) => handleMouseDown(e, bench.id, bench.offsetX ?? 0, bench.offsetY ?? 0)}
+            >
+              <div className="flex justify-between items-center mb-1">
+                <span className={`text-xs ${!isDraft ? "text-gray-400" : "font-bold text-orange-700"}`}>
+                  {!isDraft ? "Extra" : "New Extra"}
+                </span>
+                {!readOnly && <button onClick={(e) => { e.stopPropagation(); removeExtraBench(bench.id); }} className="text-red-500 text-xs hover:bg-red-100 rounded px-1">✕</button>}
+              </div>
+              {Array.from({ length: hall.seatsPerBench }).map((_, i) => {
+                const student = benchAssignments.find(a => a.benchPosition === i + 1);
+                return (
+                  <div key={i} className={`mb-1 p-1 text-xs rounded border ${student
+                    ? 'bg-white border-blue-200'
+                    : (!isDraft ? 'bg-gray-100' : 'bg-white')
+                    }`}>
+                    {student ? student.studentRollNumber : (!isDraft ? "Empty" : "Ready")}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
       </div>
 
       {!readOnly && (
         <div className="flex justify-end mt-4">
-          <Button onClick={saveSeatingPlan}>
-            Save Seating Plan
-          </Button>
+          <Button onClick={saveAll} className="bg-blue-600">Save Configuration & Plan</Button>
         </div>
       )}
-
     </div>
   );
 };

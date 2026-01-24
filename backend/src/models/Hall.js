@@ -7,6 +7,15 @@ const hallSchema = new mongoose.Schema({
   seatsPerBench: { type: Number, required: true },
   floor: { type: String },
 
+  // New Feature: Dynamic Extra Benches
+  extraBenches: [{
+    id: { type: String, required: true },
+    row: { type: Number, required: true },
+    column: { type: Number, required: true },
+    offsetX: Number,
+    offsetY: Number
+  }],
+
   facultyAssigned: [String], // Store faculty IDs as strings (from localStorage)
 
   examDate: String,

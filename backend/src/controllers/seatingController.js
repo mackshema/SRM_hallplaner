@@ -261,7 +261,8 @@ export const generateSeatingPlan = async (req, res) => {
     };
 
     for (const hall of orderedHalls) {
-      const hallCapacity = hall.rows * hall.columns * hall.seatsPerBench;
+      const extraSeats = (hall.extraBenches && hall.extraBenches.length) ? hall.extraBenches.length * hall.seatsPerBench : 0;
+      const hallCapacity = (hall.rows * hall.columns * hall.seatsPerBench) + extraSeats;
 
       // 1. Select Departments for this Hall (Target: ~3-4)
       const desiredDeptCount = 3;
@@ -368,7 +369,42 @@ export const generateSeatingPlan = async (req, res) => {
           }
         }
       }
+
+      // 6. Fill Extra Benches (If Any)
+      if (hall.extraBenches && hall.extraBenches.length > 0) {
+        for (const bench of hall.extraBenches) {
+          for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
+            let seated = false;
+            let attempts = 0;
+            while (attempts < batchDeptIds.length) {
+              const dId = batchDeptIds[batchPtr];
+              batchPtr = (batchPtr + 1) % batchDeptIds.length;
+
+              const pQueue = hallBatch.get(dId);
+              if (pQueue && pQueue.length > 0) {
+                const roll = pQueue.shift();
+                assignments.push({
+                  hallId: hall._id,
+                  row: bench.row,
+                  column: bench.column,
+                  benchPosition: seat,
+                  studentRollNumber: roll,
+                  departmentId: dId,
+                  examDate,
+                  examSession,
+                  examTime,
+                  isExtraBench: true
+                });
+                seated = true;
+                break;
+              }
+              attempts++;
+            }
+          }
+        }
+      }
     }
+
 
     // STEP 4: SAVE RESULTS TO MONGODB
     if (assignments.length > 0) {
