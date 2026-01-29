@@ -11,9 +11,6 @@ import {
 } from "@/components/ui/card";
 import { db, Hall } from "@/lib/db";
 import { getCurrentUser, logout } from "@/lib/auth";
-import { FileDown } from "lucide-react";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { useToast } from "@/hooks/use-toast";
 
 const FacultyDashboard = () => {
@@ -52,106 +49,7 @@ const FacultyDashboard = () => {
     navigate("/login");
   };
 
-  const handleFacultyExportPDF = () => {
-    if (!user || assignedHalls.length === 0) {
-      toast({
-        title: "No Data",
-        description: "No assigned halls to export.",
-        variant: "destructive",
-      });
-      return;
-    }
 
-    try {
-      const doc = new jsPDF();
-      const currentDateTime = new Date().toLocaleString('en-IN', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      // Get exam metadata from first hall (all should have same exam date/session/time)
-      const firstHall = assignedHalls[0];
-      const examDateDisplay = firstHall.examDate || "Not assigned";
-      const examSessionDisplay = firstHall.examSession || "";
-      const examTimeDisplay = firstHall.examTime || "";
-
-      // Header
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text("FACULTY HALL ASSIGNMENT", 105, 20, { align: "center" });
-
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "normal");
-      doc.text(`Faculty Name: ${user.name}`, 14, 30);
-      if (examDateDisplay !== "Not assigned") {
-        doc.text(`Exam Date: ${examDateDisplay} ${examSessionDisplay ? `(${examSessionDisplay})` : ""}`, 14, 36);
-        if (examTimeDisplay) {
-          doc.text(`Exam Time: ${examTimeDisplay}`, 14, 42);
-          doc.text(`Generated: ${currentDateTime}`, 105, 42, { align: "center" });
-        } else {
-          doc.text(`Generated: ${currentDateTime}`, 105, 36, { align: "center" });
-        }
-      } else {
-        doc.text(`Generated: ${currentDateTime}`, 105, 30, { align: "center" });
-      }
-
-      // Prepare table data
-      const tableData = assignedHalls.map((hall) => [
-        hall.name || "N/A",
-        hall.floor || "Not specified",
-        hall.examDate || "Not assigned",
-        hall.examSession || "—",
-        hall.examTime || "—",
-      ]);
-
-      // Create table
-      autoTable(doc, {
-        head: [["Hall Name", "Floor", "Exam Date", "Session", "Time"]],
-        body: tableData,
-        startY: 40,
-        theme: "grid",
-        headStyles: {
-          fillColor: [41, 128, 185],
-          textColor: [255, 255, 255],
-          fontStyle: "bold",
-        },
-        styles: {
-          fontSize: 10,
-          cellPadding: 3,
-        },
-      });
-
-      // Footer
-      const finalY = (doc as any).lastAutoTable.finalY || 40;
-      doc.setFontSize(10);
-      doc.text("Note: Seating arrangement is managed by the Examination Cell.", 14, finalY + 15);
-
-      const fileNameDate = new Date().toLocaleString('en-IN', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }).replace(/[\/\,:\s]+/g, '-');
-
-      doc.save(`faculty-hall-assignment-${user.name.replace(/\s+/g, '-')}-${fileNameDate}.pdf`);
-
-      toast({
-        title: "PDF Exported",
-        description: "Hall assignment details exported successfully.",
-      });
-    } catch (error) {
-      console.error("Error exporting PDF:", error);
-      toast({
-        title: "Error",
-        description: "Failed to export PDF.",
-        variant: "destructive",
-      });
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -176,8 +74,8 @@ const FacultyDashboard = () => {
         {loading ? (
           <p>Loading your assigned halls...</p>
         ) : assignedHalls.length > 0 ? (
-          assignedHalls.map((hall) => (
-            <Card key={hall._id} className="mb-4">
+          assignedHalls.map((hall, index) => (
+            <Card key={`${hall._id}-${index}`} className="mb-4">
               <CardHeader>
                 <CardTitle>{hall.name}</CardTitle>
                 <CardDescription>

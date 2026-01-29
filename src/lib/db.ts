@@ -56,10 +56,64 @@ export interface SeatAssignment {
   examTime?: string;
 }
 
+export interface ExamSession {
+  _id: string;
+  examDate: string;
+  examSession: "FN" | "AN";
+  examTime: string;
+  status: "DRAFT" | "FINAL";
+  finalizedAt?: string;
+}
+
 class DatabaseService {
   private apiUrl = "http://localhost:5000/api";
 
   constructor() { }
+
+  // ------------------------------------------------------------------
+  // EXAM SESSIONS
+  // ------------------------------------------------------------------
+
+  async getExamSessions(): Promise<ExamSession[]> {
+    try {
+      const res = await fetch(`${this.apiUrl}/exam-sessions`);
+      return res.ok ? await res.json() : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async createExamSession(data: {
+    examDate: string;
+    examSession: "FN" | "AN";
+    examTime: string;
+  }): Promise<ExamSession> {
+    const res = await fetch(`${this.apiUrl}/exam-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to create exam session");
+    }
+    return await res.json();
+  }
+
+  async finalizeExamSession(id: string): Promise<ExamSession> {
+    const res = await fetch(`${this.apiUrl}/exam-sessions/${id}/finalize`, {
+      method: "PUT",
+    });
+    if (!res.ok) throw new Error("Failed to finalize exam session");
+    return await res.json();
+  }
+
+  async deleteExamSession(id: string): Promise<void> {
+    const res = await fetch(`${this.apiUrl}/exam-sessions/${id}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete exam session");
+  }
 
   // ------------------------------------------------------------------
   // AUTH & USERS
@@ -253,9 +307,7 @@ class DatabaseService {
   }
 
   async generateAllSeatingPlans(
-    examDate?: string,
-    examSession?: string,
-    examTime?: string,
+    examSessionId: string,
     skipRollNumbers: string[] = [],
     manualRollNumbers: string[] = []
   ): Promise<{ success: boolean; unallocated: string[] }> {
@@ -266,9 +318,7 @@ class DatabaseService {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          examDate,
-          examSession,
-          examTime,
+          examSessionId,
           departments: departments.map(dept => ({
             name: dept.name,
             rollNumberStart: dept.rollNumberStart,
@@ -296,9 +346,13 @@ class DatabaseService {
     }
   }
 
-  async getAllSeatAssignments(): Promise<SeatAssignment[]> {
+  async getAllSeatAssignments(examSessionId?: string): Promise<SeatAssignment[]> {
     try {
-      const res = await fetch(`${this.apiUrl}/seating/all`);
+      const url = examSessionId
+        ? `${this.apiUrl}/seating/all?examSessionId=${examSessionId}`
+        : `${this.apiUrl}/seating/all`;
+
+      const res = await fetch(url);
       if (!res.ok) {
         return [];
       }

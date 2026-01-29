@@ -403,8 +403,6 @@ export const exportBenchLayoutWordDoc = async ({
                     page: {
                         size: {
                             orientation: PageOrientation.LANDSCAPE,
-                            width: 16838, // A4 Landscape width (approx 297mm)
-                            height: 11906, // A4 Landscape height (approx 210mm)
                         },
                         margin: {
                             top: 720, // 0.5 inch

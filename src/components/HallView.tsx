@@ -24,6 +24,7 @@ import { FileDown } from "lucide-react";
 interface HallViewProps {
   hallId: string;   // ✅ MongoDB ObjectId (Strict String)
   readOnly?: boolean;
+  examSessionId?: string | null;
 }
 
 interface StudentSeat {
@@ -36,7 +37,7 @@ interface StudentSeat {
   isExtraBench?: boolean;
 }
 
-const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
+const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) => {
   const [hall, setHall] = useState<Hall | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [seats, setSeats] = useState<StudentSeat[][]>([]);
@@ -140,7 +141,7 @@ const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
     };
 
     fetchHallDetails();
-  }, [hallId]);
+  }, [hallId, examSessionId]); // Added examSessionId dependency
 
 
 
@@ -148,8 +149,12 @@ const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
   useEffect(() => {
     if (!hallId || !hall) return;
 
+    const url = examSessionId
+      ? `http://localhost:5000/api/seating/hall/${hallId}?examSessionId=${examSessionId}`
+      : `http://localhost:5000/api/seating/hall/${hallId}`; // Fallback
+
     // Load seating assignments from MongoDB
-    fetch(`http://localhost:5000/api/seating/hall/${hallId}`)
+    fetch(url)
       .then((res) => res.json())
       .then((data) => {
         if (!data) return;
@@ -157,7 +162,7 @@ const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
         const assignments = data.assignments || [];
         setSeatAssignments(assignments);
 
-        // Load exam metadata from hall if available
+        // Load exam metadata from session response if available
         if (data.examDate) setExamDate(data.examDate);
         if (data.examSession) setExamSession(data.examSession);
         if (data.examTime) setExamTime(data.examTime);
@@ -168,7 +173,7 @@ const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
       .catch((err) => {
         console.error("Failed to load saved seating:", err);
       });
-  }, [hallId, hall]);
+  }, [hallId, hall, examSessionId]);
 
 
 
@@ -763,6 +768,7 @@ const HallView = ({ hallId, readOnly = false }: HallViewProps) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           hallId: hall._id, // ✅ FIX: hall._id
+          examSessionId, // ✅ ADDED
           examDate,
           examSession,
           examTime,

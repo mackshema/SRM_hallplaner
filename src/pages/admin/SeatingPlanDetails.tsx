@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,6 +15,7 @@ import HallView from "@/components/HallView";
 const SeatingPlanDetails = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [hall, setHall] = useState<Hall | null>(null);
   const [faculty, setFaculty] = useState<User[]>([]);
@@ -132,7 +133,7 @@ const SeatingPlanDetails = () => {
 
         <CardContent>
           {/* 👇 SAFE: only render when hall exists */}
-          {hall && <HallView hallId={hall._id} />}
+          {hall && <HallView hallId={hall._id} examSessionId={searchParams.get("examSessionId")} />}
         </CardContent>
       </Card>
     </div>

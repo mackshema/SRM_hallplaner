@@ -10,6 +10,8 @@ import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import departmentRoutes from "./routes/departmentRoutes.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
+import examSessionRoutes from "./routes/examSessionRoutes.js";
+
 
 dotenv.config();
 connectDB();
@@ -28,6 +30,8 @@ app.use("/api/departments", departmentRoutes); // Departments
 app.use("/api/halls", hallRoutes); // Halls
 app.use("/api/seating", seatingRoutes); // Seating Logic
 app.use("/api/settings", settingsRoutes); // Global Settings
+app.use("/api/exam-sessions", examSessionRoutes); // Exam Sessions
+
 
 //  TEST ROUTE
 app.get("/", (req, res) => {

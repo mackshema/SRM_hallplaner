@@ -1,45 +1,57 @@
 import SeatAssignment from "../models/SeatAssignment.js";
 import Hall from "../models/Hall.js";
 import Department from "../models/Department.js";
+import ExamSession from "../models/ExamSession.js";
 
 /* ===============================
    SAVE SEATING PLAN (ADMIN)
 ================================ */
 export const saveSeatingPlan = async (req, res) => {
   try {
-    const { hallId, examDate, examSession, examTime, assignments } = req.body;
+    const { hallId, examSessionId, assignments } = req.body;
+
+    if (!examSessionId) {
+      return res.status(400).json({ error: "Exam Session ID is required" });
+    }
+
+    const session = await ExamSession.findById(examSessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Exam session not found" });
+    }
+
+    if (session.status === "FINAL") {
+      return res.status(400).json({ error: "Cannot edit a finalized seating plan" });
+    }
 
     // Validate duplicate roll numbers within this hall
     const rollNumbers = assignments
-      .map(a => a.studentRollNumber)
-      .filter(r => r); // Filter out empty/null
+      .map((a) => a.studentRollNumber)
+      .filter((r) => r); // Filter out empty/null
 
     const uniqueRolls = new Set(rollNumbers);
     if (rollNumbers.length !== uniqueRolls.size) {
       const duplicates = rollNumbers.filter((r, i) => rollNumbers.indexOf(r) !== i);
       return res.status(400).json({
         error: "Duplicate roll numbers detected",
-        duplicates: [...new Set(duplicates)]
+        duplicates: [...new Set(duplicates)],
       });
     }
 
-    await SeatAssignment.deleteMany({ hallId });
+    // Delete existing assignments for THIS hall and THIS session
+    await SeatAssignment.deleteMany({ hallId, examSessionId });
 
     const docs = assignments.map((a) => ({
       ...a,
       hallId,
-      examDate,
-      examSession,
-      examTime,
+      examSessionId,
+      examDate: session.examDate,
+      examSession: session.examSession,
+      examTime: session.examTime,
     }));
 
     await SeatAssignment.insertMany(docs);
 
-    await Hall.findByIdAndUpdate(hallId, {
-      examDate,
-      examSession,
-      examTime,
-    });
+    // NOTE: We do NOT update Hall global strings (examDate, etc.) to preserve history support.
 
     res.json({ success: true });
   } catch (err) {
@@ -54,15 +66,20 @@ export const saveSeatingPlan = async (req, res) => {
 export const getHallSeating = async (req, res) => {
   try {
     const { hallId } = req.params;
+    const { examSessionId } = req.query;
 
-    const assignments = await SeatAssignment.find({ hallId });
+    if (!examSessionId) {
+      // Fallback or empty if no session specified
+      return res.json({ assignments: [], examDate: "", examSession: "", examTime: "" });
+    }
 
-    // Also get exam metadata from hall
-    const hall = await Hall.findById(hallId);
-    const examMetadata = hall ? {
-      examDate: hall.examDate,
-      examSession: hall.examSession,
-      examTime: hall.examTime
+    const assignments = await SeatAssignment.find({ hallId, examSessionId });
+    const session = await ExamSession.findById(examSessionId);
+
+    const examMetadata = session ? {
+      examDate: session.examDate,
+      examSession: session.examSession,
+      examTime: session.examTime
     } : {};
 
     res.json({
@@ -80,7 +97,10 @@ export const getHallSeating = async (req, res) => {
 ================================ */
 export const getAllSeatAssignments = async (req, res) => {
   try {
-    const assignments = await SeatAssignment.find();
+    const { examSessionId } = req.query;
+    const query = examSessionId ? { examSessionId } : {};
+
+    const assignments = await SeatAssignment.find(query);
     res.json({ assignments });
   } catch (err) {
     console.error(err);
@@ -90,27 +110,57 @@ export const getAllSeatAssignments = async (req, res) => {
 
 /* ===============================
    FACULTY SUMMARY (READ-ONLY)
+   Shows halls assigned to faculty for FINAL exams
 ================================ */
 export const getFacultyHallSummary = async (req, res) => {
   try {
     const { facultyId } = req.params;
 
     // facultyId can be number (from localStorage) or string (from MongoDB)
-    // Convert to string for matching
     const facultyIdStr = String(facultyId);
 
-    const halls = await Hall.find({
-      facultyAssigned: { $in: [facultyIdStr, facultyId] }, // Match both string and number
+    // 1. Find all halls assigned to this faculty
+    const myHalls = await Hall.find({
+      facultyAssigned: { $in: [facultyIdStr, facultyId] },
     });
 
-    const summary = halls.map((hall) => ({
-      hallId: hall._id,
-      hallName: hall.name,
-      floor: hall.floor || "",
-      examDate: hall.examDate || "",
-      examSession: hall.examSession || "",
-      examTime: hall.examTime || "",
-    }));
+    if (myHalls.length === 0) {
+      return res.json([]);
+    }
+
+    const myHallIds = myHalls.map(h => h._id);
+
+    // 2. Find all FINAL exam sessions
+    const finalSessions = await ExamSession.find({ status: "FINAL" }).sort({ examDate: 1 });
+
+    if (finalSessions.length === 0) {
+      return res.json([]);
+    }
+
+    const summary = [];
+
+    // 3. Build summary: For each session, which halls am I managing?
+    // We check if there are seat assignments for this session + my hall
+    // OR we just assume if I'm assigned to Hall A, I manage it for all Final Sessions?
+    // User Prompt: "Faculty dashboard shows that date’s halls... Query logic: find ExamSession where status = FINAL -> Fetch halls assigned"
+    // This implies showing the hall even if empty? Likely yes.
+
+    for (const session of finalSessions) {
+      for (const hall of myHalls) {
+        // Optional: Check if hall has students allocated for this session?
+        // Let's rely on standard practice: If I am assigned to Hall A, I show up for Exam X in Hall A.
+
+        summary.push({
+          hallId: hall._id,
+          hallName: hall.name,
+          floor: hall.floor || "",
+          examDate: session.examDate,
+          examSession: session.examSession,
+          examTime: session.examTime,
+          examSessionId: session._id
+        });
+      }
+    }
 
     res.json(summary);
   } catch (error) {
@@ -126,16 +176,28 @@ export const getFacultyHallSummary = async (req, res) => {
 export const generateSeatingPlan = async (req, res) => {
   try {
     const {
-      examDate,
-      examSession,
-      examTime,
+      examSessionId,
       departments: frontendDepartments,
       skipRollNumbers = [],
-      manualRollNumbers = []
+      manualRollNumbers = [],
     } = req.body;
 
-    // Delete all existing assignments
-    await SeatAssignment.deleteMany({});
+    if (!examSessionId) {
+      return res.status(400).json({ message: "Exam Session ID is required" });
+    }
+
+    const session = await ExamSession.findById(examSessionId);
+    if (!session) {
+      return res.status(404).json({ message: "Exam Session not found" });
+    }
+    if (session.status === "FINAL") {
+      return res.status(400).json({ message: "Cannot regenerate a finalized session" });
+    }
+
+    const { examDate, examSession, examTime } = session;
+
+    // Delete all existing assignments FOR THIS SESSION
+    await SeatAssignment.deleteMany({ examSessionId });
 
     // Get all halls
     const halls = await Hall.find();
@@ -153,19 +215,18 @@ export const generateSeatingPlan = async (req, res) => {
           {
             name: dept.name,
             rollNumberStart: dept.rollNumberStart,
-            rollNumberEnd: dept.rollNumberEnd
+            rollNumberEnd: dept.rollNumberEnd,
           },
           {
             name: dept.name,
             rollNumberStart: dept.rollNumberStart,
-            rollNumberEnd: dept.rollNumberEnd
+            rollNumberEnd: dept.rollNumberEnd,
           },
           { upsert: true, new: true }
         );
         departments.push(existingDept);
       }
     } else {
-      // Fallback: try to get from MongoDB if frontend didn't send
       departments = await Department.find();
     }
 
@@ -173,81 +234,60 @@ export const generateSeatingPlan = async (req, res) => {
       return res.status(400).json({ message: "No departments found. Please create departments first." });
     }
 
-    // Update Halls with Exam Metadata
-    if (examDate || examSession || examTime) {
-      await Hall.updateMany({}, {
-        examDate,
-        examSession,
-        examTime
-      });
-    }
-
     // STEP 1: BUILD GLOBAL ROLL QUEUES (ONE PER DEPARTMENT)
-    // Convert skip/manual arrays to Sets for fast lookup
-    const skipSet = new Set(skipRollNumbers.map(r => r.toString().trim()).filter(Boolean));
-    const manualSet = new Set(manualRollNumbers.map(r => r.toString().trim()).filter(Boolean));
+    const skipSet = new Set(skipRollNumbers.map((r) => r.toString().trim()).filter(Boolean));
+    const manualSet = new Set(manualRollNumbers.map((r) => r.toString().trim()).filter(Boolean));
 
     const deptQueues = {};
     departments.forEach((dept) => {
       deptQueues[dept._id] = [];
-
-      // Build roll number queue for this department
       for (
         let r = Number(dept.rollNumberStart);
         r <= Number(dept.rollNumberEnd);
         r++
       ) {
         const rollStr = r.toString();
-        // Skip if in skip list OR in manual list (to avoid duplicates)
         if (!skipSet.has(rollStr) && !manualSet.has(rollStr)) {
           deptQueues[dept._id].push(rollStr);
         }
       }
     });
 
-    // Add manual roll numbers to appropriate department queues
+    // Add manual roll numbers
     manualSet.forEach((manualRoll) => {
       const rollNum = Number(manualRoll);
-      let assigned = false;
       for (const dept of departments) {
         const start = Number(dept.rollNumberStart);
         const end = Number(dept.rollNumberEnd);
         if (rollNum >= start && rollNum <= end) {
           deptQueues[dept._id].unshift(manualRoll); // Priority
-          assigned = true;
           break;
         }
       }
     });
 
-    // STEP 2: RANDOMIZE STARTING HALL (ROTATE, NOT SHUFFLE - EXISTING LOGIC)
+    // STEP 2: RANDOMIZE STARTING HALL
     const startIndex = Math.floor(Math.random() * halls.length);
     const orderedHalls = [
       ...halls.slice(startIndex),
-      ...halls.slice(0, startIndex)
+      ...halls.slice(0, startIndex),
     ];
 
-    // STEP 2.5: SHUFFLE DEPARTMENTS (REQ: "Shuffling departments on every generation")
+    // STEP 2.5: SHUFFLE DEPARTMENTS
     const deptIds = Object.keys(deptQueues);
-    // Fisher-Yates Shuffle for better randomness than random sort
     const shuffledDeptIds = [...deptIds];
     for (let i = shuffledDeptIds.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffledDeptIds[i], shuffledDeptIds[j]] = [shuffledDeptIds[j], shuffledDeptIds[i]];
     }
 
-    // STEP 3: HALL-BY-HALL FILLING (DEPARTMENT-CENTRIC BATCHING)
+    // STEP 3: HALL-BY-HALL FILLING
     const assignments = [];
-
-    // Global pointer for department rotation
-    // We rotate the "Active Window" of departments for each hall
     let deptPtr = 0;
 
-    // Helper to get next N non-empty departments
     const getNextActiveDepts = (n) => {
       const active = [];
       let checked = 0;
-      // We loop at most through "allDepartments * 2" to ensure we find some if flexible
       while (active.length < n && checked < shuffledDeptIds.length) {
         const dId = shuffledDeptIds[(deptPtr + checked) % shuffledDeptIds.length];
         if (deptQueues[dId] && deptQueues[dId].length > 0) {
@@ -264,35 +304,21 @@ export const generateSeatingPlan = async (req, res) => {
       const extraSeats = (hall.extraBenches && hall.extraBenches.length) ? hall.extraBenches.length * hall.seatsPerBench : 0;
       const hallCapacity = (hall.rows * hall.columns * hall.seatsPerBench) + extraSeats;
 
-      // 1. Select Departments for this Hall (Target: ~3-4)
       const desiredDeptCount = 3;
-
-      // Let's grab active depts starting from current deptPtr
       let activeDepts = getNextActiveDepts(desiredDeptCount);
 
-      if (activeDepts.length === 0) break; // No one left anywhere
+      if (activeDepts.length === 0) break;
 
-      // SHIFT POINTER: Move it forward by 1 to rotate the selection for next hall
-      // "Every Generate button click changes the department -> hall starting order" (Done by shuffle)
-      // "Roll number 1 doesn't always start from same hall" (Done by rotation)
-      // For NEXT HALL, we shift the window.
       deptPtr = (deptPtr + 1) % shuffledDeptIds.length;
 
-      // 2. Prep Batch Allocations
       const hallBatch = new Map();
-      activeDepts.forEach(d => hallBatch.set(d, []));
+      activeDepts.forEach((d) => hallBatch.set(d, []));
 
       let seatsFilled = 0;
-
-      // 3. Batch Distribution Phase (Continuous Blocks)
-      // "Average distribution per department per hall"
-      // "Avg = floor(totalHallCapacity / totalDepartments)" -> Local Context: / activeDepts.length
-
       const targetPerDept = Math.floor(hallCapacity / activeDepts.length);
 
-      activeDepts.forEach(dId => {
+      activeDepts.forEach((dId) => {
         const queue = deptQueues[dId];
-        // Take up to targetPerDept
         const takeCount = Math.min(targetPerDept, queue.length);
         for (let k = 0; k < takeCount; k++) {
           hallBatch.get(dId).push(queue.shift());
@@ -300,48 +326,29 @@ export const generateSeatingPlan = async (req, res) => {
         }
       });
 
-      // 4. Fill Remainder (Backfill if hall not full)
-      // If we still have space, round robin through activeDepts (then others) until full
-
       let safetyCheck = 0;
-      while (seatsFilled < hallCapacity && safetyCheck < (hallCapacity * 2)) {
+      while (seatsFilled < hallCapacity && safetyCheck < hallCapacity * 2) {
         safetyCheck++;
-
-        // Dynamically find valid departments with students
-        // We prefer activeDepts, then ANY valid dept
-        let candidates = activeDepts.filter(d => deptQueues[d].length > 0);
-
+        let candidates = activeDepts.filter((d) => deptQueues[d].length > 0);
         if (candidates.length === 0) {
-          // Broaden search to global
-          candidates = shuffledDeptIds.filter(d => deptQueues[d].length > 0);
-          if (candidates.length === 0) break; // GLOBAL EMPTY
-
-          // If we found new global candidates, add them to our batch map 
-          // so they can be interleaved
-          candidates.forEach(c => {
+          candidates = shuffledDeptIds.filter((d) => deptQueues[d].length > 0);
+          if (candidates.length === 0) break;
+          candidates.forEach((c) => {
             if (!hallBatch.has(c)) hallBatch.set(c, []);
           });
         }
-
-        // Round robin pick one to add ONE student to batch
-        // We use 'seatsFilled' as a rough index for rotation
         const dId = candidates[seatsFilled % candidates.length];
         hallBatch.get(dId).push(deptQueues[dId].shift());
         seatsFilled++;
       }
 
-      // 5. Commit to Hall (Interleaved Rendering)
-      // Now hallBatch has all students for this hall, grouped by Dept.
-      // We must seat them Round-Robin to ensure "Same department students must NOT sit together"
-
       const batchDeptIds = Array.from(hallBatch.keys());
       let batchPtr = 0;
 
+      // Fill Regular Seats
       for (let row = 1; row <= hall.rows; row++) {
         for (let col = 1; col <= hall.columns; col++) {
           for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
-            // Find next dept in our batch that has a student ready
-            let seated = false;
             let attempts = 0;
             while (attempts < batchDeptIds.length) {
               const dId = batchDeptIds[batchPtr];
@@ -359,9 +366,9 @@ export const generateSeatingPlan = async (req, res) => {
                   departmentId: dId,
                   examDate,
                   examSession,
-                  examTime
+                  examTime,
+                  examSessionId, // ADDED
                 });
-                seated = true;
                 break;
               }
               attempts++;
@@ -370,11 +377,10 @@ export const generateSeatingPlan = async (req, res) => {
         }
       }
 
-      // 6. Fill Extra Benches (If Any)
+      // Fill Extra Benches
       if (hall.extraBenches && hall.extraBenches.length > 0) {
         for (const bench of hall.extraBenches) {
           for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
-            let seated = false;
             let attempts = 0;
             while (attempts < batchDeptIds.length) {
               const dId = batchDeptIds[batchPtr];
@@ -393,9 +399,9 @@ export const generateSeatingPlan = async (req, res) => {
                   examDate,
                   examSession,
                   examTime,
-                  isExtraBench: true
+                  examSessionId, // ADDED
+                  isExtraBench: true,
                 });
-                seated = true;
                 break;
               }
               attempts++;
@@ -405,15 +411,13 @@ export const generateSeatingPlan = async (req, res) => {
       }
     }
 
-
-    // STEP 4: SAVE RESULTS TO MONGODB
+    // STEP 4: SAVE RESULTS
     if (assignments.length > 0) {
       await SeatAssignment.insertMany(assignments);
     }
 
-    // Calculate unallocated roll numbers
     const unallocated = [];
-    deptIds.forEach(deptId => {
+    deptIds.forEach((deptId) => {
       if (deptQueues[deptId] && deptQueues[deptId].length > 0) {
         unallocated.push(...deptQueues[deptId]);
       }
@@ -422,7 +426,7 @@ export const generateSeatingPlan = async (req, res) => {
     res.json({
       success: true,
       count: assignments.length,
-      unallocated: unallocated
+      unallocated: unallocated,
     });
   } catch (err) {
     console.error("Generation error:", err);

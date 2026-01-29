@@ -7,6 +7,11 @@ const seatAssignmentSchema = new mongoose.Schema(
       ref: "Hall",
       required: true,
     },
+    examSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ExamSession",
+      required: true,
+    },
     row: Number,
     column: Number,
     benchPosition: Number,
