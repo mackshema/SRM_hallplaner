@@ -40,6 +40,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Search } from "lucide-react";
 
 const HallsManagement = () => {
   const [halls, setHalls] = useState<Hall[]>([]);
@@ -60,6 +62,7 @@ const HallsManagement = () => {
     facultyAssigned: [] as string[],
     floor: ""
   });
+  const [searchQuery, setSearchQuery] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -347,6 +350,54 @@ const HallsManagement = () => {
     );
   }
 
+
+
+  const filteredHalls = halls.filter(hall =>
+    hall.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (hall.floor && hall.floor.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const allSelected = filteredHalls.length > 0 && filteredHalls.every(h => h.isSelected !== false);
+
+  const toggleSelection = async (hall: Hall) => {
+    try {
+      const newStatus = !(hall.isSelected !== false); // Default is true, so if undefined treat as true
+      // Optimistic update
+      setHalls(prev => prev.map(h => h._id === hall._id ? { ...h, isSelected: newStatus } : h));
+
+      await fetch(`http://localhost:5000/api/halls/${hall._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isSelected: newStatus }),
+      });
+    } catch (error) {
+      toast({ title: "Failed to update selection", variant: "destructive" });
+    }
+  };
+
+  const toggleAll = async () => {
+    const newStatus = !allSelected;
+    // Optimistic
+    setHalls(prev => prev.map(h => {
+      if (filteredHalls.some(fh => fh._id === h._id)) {
+        return { ...h, isSelected: newStatus };
+      }
+      return h;
+    }));
+
+    // Batch update? API only supports single update. We loop.
+    // In production, should have a bulk update endpoint.
+    for (const hall of filteredHalls) {
+      if ((hall.isSelected !== false) !== newStatus) {
+        await fetch(`http://localhost:5000/api/halls/${hall._id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isSelected: newStatus }),
+        });
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -508,10 +559,26 @@ const HallsManagement = () => {
         </AlertDialog>
       </div>
 
+      <div className="flex items-center space-x-2 bg-white p-2 rounded-md border w-full md:w-1/3">
+        <Search className="text-gray-400 h-4 w-4" />
+        <Input
+          placeholder="Search halls..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="border-none focus-visible:ring-0 h-8"
+        />
+      </div>
+
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[50px]">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={toggleAll}
+                />
+              </TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Configuration</TableHead>
               <TableHead>Faculty Assigned</TableHead>
@@ -519,15 +586,24 @@ const HallsManagement = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {halls.length === 0 ? (
+            {filteredHalls.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-gray-500">
-                  No exam halls created yet. Create your first hall to get started.
+                <TableCell colSpan={5} className="text-center py-8 text-gray-500">
+                  {searchQuery ? "No halls match your search." : "No exam halls created yet. Create your first hall to get started."}
                 </TableCell>
               </TableRow>
             ) : (
-              halls.map(hall => (
-                <TableRow key={hall._id}>
+              filteredHalls.map(hall => (
+                <TableRow
+                  key={hall._id}
+                  className={`transition-opacity duration-200 ${hall.isSelected === false ? "opacity-50 grayscale bg-gray-50" : ""}`}
+                >
+                  <TableCell>
+                    <Checkbox
+                      checked={hall.isSelected !== false}
+                      onCheckedChange={() => toggleSelection(hall)}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{hall.name}</TableCell>
                   <TableCell>
                     {hall.rows} rows × {hall.columns} columns, {hall.seatsPerBench} seats per bench
@@ -569,7 +645,7 @@ const HallsManagement = () => {
           </TableBody>
         </Table>
       </div>
-    </div>
+    </div >
   );
 };
 

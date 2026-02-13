@@ -25,6 +25,8 @@ import { toast } from "@/components/ui/use-toast";
 import { FileDown, Pencil, Eye } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Search } from "lucide-react";
 
 const FacultyManagement = () => {
   const [faculty, setFaculty] = useState<User[]>([]);
@@ -38,6 +40,7 @@ const FacultyManagement = () => {
 
   // Selection State
   const [selectedFaculty, setSelectedFaculty] = useState<User | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Form Data
   const [formData, setFormData] = useState({
@@ -286,6 +289,50 @@ const FacultyManagement = () => {
     }
   };
 
+  const filteredFaculty = faculty.filter(f =>
+    f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (f.department && f.department.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const allSelected = filteredFaculty.length > 0 && filteredFaculty.every(f => f.isSelected !== false);
+
+  const toggleSelection = async (member: User) => {
+    try {
+      const id = member._id || member.id;
+      if (!id) return;
+
+      const newStatus = !(member.isSelected !== false);
+
+      // Optimistic
+      setFaculty(prev => prev.map(f => (f._id || f.id) === id ? { ...f, isSelected: newStatus } : f));
+
+      await db.updateFaculty(id, { isSelected: newStatus });
+    } catch (error) {
+      toast({ title: "Failed to update selection", variant: "destructive" });
+    }
+  };
+
+  const toggleAll = async () => {
+    const newStatus = !allSelected;
+    // Optimistic
+    setFaculty(prev => prev.map(f => {
+      const id = f._id || f.id;
+      if (filteredFaculty.some(ff => (ff._id || ff.id) === id)) {
+        return { ...f, isSelected: newStatus };
+      }
+      return f;
+    }));
+
+    for (const member of filteredFaculty) {
+      const id = member._id || member.id;
+      if (!id) continue;
+
+      if ((member.isSelected !== false) !== newStatus) {
+        await db.updateFaculty(id, { isSelected: newStatus });
+      }
+    }
+  };
+
   if (loading) {
     return <div className="p-8 text-center">Loading faculty data...</div>;
   }
@@ -442,10 +489,26 @@ const FacultyManagement = () => {
         </div>
       </div>
 
+      <div className="flex items-center space-x-2 bg-white p-2 rounded-md border w-full md:w-1/3">
+        <Search className="text-gray-400 h-4 w-4" />
+        <Input
+          placeholder="Search faculty..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="border-none focus-visible:ring-0 h-8"
+        />
+      </div>
+
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[50px]">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={toggleAll}
+                />
+              </TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Department</TableHead>
               <TableHead>Username</TableHead>
@@ -454,15 +517,24 @@ const FacultyManagement = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {faculty.length === 0 ? (
+            {filteredFaculty.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-gray-500">
-                  No faculty members found.
+                <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                  {searchQuery ? "No faculty found matching your search." : "No faculty members found."}
                 </TableCell>
               </TableRow>
             ) : (
-              faculty.map(member => (
-                <TableRow key={member.id}>
+              filteredFaculty.map(member => (
+                <TableRow
+                  key={member.id}
+                  className={`transition-opacity duration-200 ${member.isSelected === false ? "opacity-50 grayscale bg-gray-50" : ""}`}
+                >
+                  <TableCell>
+                    <Checkbox
+                      checked={member.isSelected !== false}
+                      onCheckedChange={() => toggleSelection(member)}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{member.name}</TableCell>
                   <TableCell>{member.department || "N/A"}</TableCell>
                   <TableCell>{member.username}</TableCell>

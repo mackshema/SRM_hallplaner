@@ -10,7 +10,8 @@ const userSchema = new mongoose.Schema(
       enum: ["admin", "faculty"], // Lowercase to match frontend
       default: "faculty"
     },
-    department: { type: String } // Optional for faculty
+    department: { type: String }, // Optional for faculty
+    isSelected: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

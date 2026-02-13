@@ -66,6 +66,31 @@ export const finalizeExamSession = async (req, res) => {
     }
 };
 
+
+/* ===============================
+   UN-FINALIZE EXAM SESSION (Revert to Draft)
+================================ */
+export const unfinalizeExamSession = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const session = await ExamSession.findByIdAndUpdate(
+            id,
+            { status: "DRAFT" },
+            { new: true }
+        );
+
+        if (!session) {
+            return res.status(404).json({ error: "Exam session not found" });
+        }
+
+        res.json(session);
+    } catch (err) {
+        console.error("Error unfinalizing exam session:", err);
+        res.status(500).json({ error: "Failed to unfinalize exam session" });
+    }
+};
+
 /* ===============================
    DELETE EXAM SESSION
 ================================ */

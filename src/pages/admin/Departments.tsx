@@ -25,6 +25,8 @@ import { db, Department, Hall, SeatAssignment } from "@/lib/db";
 import { FileDown } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Search } from "lucide-react";
 const DepartmentsManagement = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [halls, setHalls] = useState<Hall[]>([]);
@@ -35,6 +37,7 @@ const DepartmentsManagement = () => {
     rollNumberEnd: ""
   });
   const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -282,6 +285,53 @@ const DepartmentsManagement = () => {
     }
   };
 
+
+  const filteredDepartments = departments.filter(dept =>
+    dept.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const allSelected = filteredDepartments.length > 0 && filteredDepartments.every(d => d.isSelected !== false);
+
+  const toggleSelection = async (dept: Department) => {
+    try {
+      const id = dept._id || String(dept.id);
+      const newStatus = !(dept.isSelected !== false);
+
+      // Optimistic
+      setDepartments(prev => prev.map(d => (d._id || String(d.id)) === id ? { ...d, isSelected: newStatus } : d));
+
+      await fetch(`http://localhost:5000/api/departments/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isSelected: newStatus }),
+      });
+    } catch (error) {
+      toast({ title: "Failed to update selection", variant: "destructive" });
+    }
+  };
+
+  const toggleAll = async () => {
+    const newStatus = !allSelected;
+    // Optimistic
+    setDepartments(prev => prev.map(d => {
+      if (filteredDepartments.some(fd => (fd._id || String(fd.id)) === (d._id || String(d.id)))) {
+        return { ...d, isSelected: newStatus };
+      }
+      return d;
+    }));
+
+    for (const dept of filteredDepartments) {
+      if ((dept.isSelected !== false) !== newStatus) {
+        const id = dept._id || String(dept.id);
+        await fetch(`http://localhost:5000/api/departments/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isSelected: newStatus }),
+        });
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -349,25 +399,52 @@ const DepartmentsManagement = () => {
         </div>
       </div>
 
+
+
+      <div className="flex items-center space-x-2 bg-white p-2 rounded-md border w-full md:w-1/3">
+        <Search className="text-gray-400 h-4 w-4" />
+        <Input
+          placeholder="Search departments..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="border-none focus-visible:ring-0 h-8"
+        />
+      </div>
+
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[50px]">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={toggleAll}
+                />
+              </TableHead>
               <TableHead>Department Name</TableHead>
               <TableHead>Roll Number Range</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {departments.length === 0 ? (
+            {filteredDepartments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} className="text-center py-8 text-gray-500">
-                  No departments added yet. Add your first department to get started.
+                <TableCell colSpan={4} className="text-center py-8 text-gray-500">
+                  {searchQuery ? "No departments match your search." : "No departments added yet. Add your first department to get started."}
                 </TableCell>
               </TableRow>
             ) : (
-              departments.map((department) => (
-                <TableRow key={department._id || department.id}>
+              filteredDepartments.map((department) => (
+                <TableRow
+                  key={department._id || department.id}
+                  className={`transition-opacity duration-200 ${department.isSelected === false ? "opacity-50 grayscale bg-gray-50" : ""}`}
+                >
+                  <TableCell>
+                    <Checkbox
+                      checked={department.isSelected !== false}
+                      onCheckedChange={() => toggleSelection(department)}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">
                     {department.name}
                   </TableCell>

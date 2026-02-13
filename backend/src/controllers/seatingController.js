@@ -199,8 +199,8 @@ export const generateSeatingPlan = async (req, res) => {
     // Delete all existing assignments FOR THIS SESSION
     await SeatAssignment.deleteMany({ examSessionId });
 
-    // Get all halls
-    const halls = await Hall.find();
+    // Get all SELECTED halls
+    const halls = await Hall.find({ isSelected: true });
 
     if (!halls.length) {
       return res.status(400).json({ message: "No halls found" });
@@ -226,8 +226,11 @@ export const generateSeatingPlan = async (req, res) => {
         );
         departments.push(existingDept);
       }
+      // Filter out unselected ones provided by frontend if any? 
+      // Actually, if frontend provides them, we assume they are the selected ones.
+      // But we should double check if the user "unchecked" them on the frontend, the frontend should just NOT send them.
     } else {
-      departments = await Department.find();
+      departments = await Department.find({ isSelected: true });
     }
 
     if (!departments.length) {

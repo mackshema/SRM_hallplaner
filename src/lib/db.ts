@@ -10,6 +10,7 @@ export interface User {
   password?: string;
   role: 'admin' | 'faculty';
   department?: string;
+  isSelected?: boolean;
 }
 
 export interface Department {
@@ -18,6 +19,7 @@ export interface Department {
   name: string;
   rollNumberStart: string;
   rollNumberEnd: string;
+  isSelected?: boolean;
 }
 
 export interface Hall {
@@ -40,6 +42,7 @@ export interface Hall {
   examDate?: string;
   examSession?: "FN" | "AN";
   examTime?: string;
+  isSelected?: boolean;
 }
 
 
@@ -105,6 +108,14 @@ class DatabaseService {
       method: "PUT",
     });
     if (!res.ok) throw new Error("Failed to finalize exam session");
+    return await res.json();
+  }
+
+  async unfinalizeExamSession(id: string): Promise<ExamSession> {
+    const res = await fetch(`${this.apiUrl}/exam-sessions/${id}/unfinalize`, {
+      method: "PUT",
+    });
+    if (!res.ok) throw new Error("Failed to unfinalize exam session");
     return await res.json();
   }
 

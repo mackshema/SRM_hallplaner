@@ -21,6 +21,8 @@ const hallSchema = new mongoose.Schema({
   examDate: String,
   examSession: String,
   examTime: String,
+
+  isSelected: { type: Boolean, default: true },
 });
 
 export default mongoose.model("Hall", hallSchema);

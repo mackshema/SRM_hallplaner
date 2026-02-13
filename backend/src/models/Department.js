@@ -7,6 +7,7 @@ const departmentSchema = new mongoose.Schema(
     rollNumberStart: { type: String, required: true },
 
     rollNumberEnd: { type: String, required: true },
+    isSelected: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

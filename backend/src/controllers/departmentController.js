@@ -40,8 +40,9 @@ export const updateDepartment = async (req, res) => {
 
         if (department) {
             department.name = name;
-            department.rollNumberStart = rollNumberStart;
-            department.rollNumberEnd = rollNumberEnd;
+            department.rollNumberStart = rollNumberStart || department.rollNumberStart;
+            department.rollNumberEnd = rollNumberEnd || department.rollNumberEnd;
+            if (req.body.isSelected !== undefined) department.isSelected = req.body.isSelected;
 
             const updatedDepartment = await department.save();
             res.json(updatedDepartment);

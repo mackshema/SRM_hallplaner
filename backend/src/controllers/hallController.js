@@ -194,6 +194,9 @@ export const updateHall = async (req, res) => {
     if (extraBenches !== undefined) {
       hall.extraBenches = extraBenches;
     }
+    if (req.body.isSelected !== undefined) {
+      hall.isSelected = req.body.isSelected;
+    }
 
     const updatedHall = await hall.save();
     res.json(updatedHall);

@@ -485,6 +485,25 @@ const SeatingPlans = () => {
                 Finalize Seating Plan
               </Button>
             )}
+            {isFinalized && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-yellow-600 text-yellow-700 hover:bg-yellow-50"
+                onClick={async () => {
+                  try {
+                    const updated = await db.unfinalizeExamSession(selectedSessionId);
+                    setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                    toast({ title: "Unlocked", description: "Seating plan reverted to DRAFT mode." });
+                  } catch (err: any) {
+                    toast({ title: "Error", description: err.message, variant: "destructive" });
+                  }
+                }}
+              >
+                <Lock className="h-3 w-3 mr-2" />
+                Unlock / Edit Plan
+              </Button>
+            )}
           </div>
         </div>
       )}

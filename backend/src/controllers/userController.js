@@ -79,6 +79,9 @@ export const updateUser = async (req, res) => {
             if (req.body.password) {
                 user.password = req.body.password;
             }
+            if (req.body.isSelected !== undefined) {
+                user.isSelected = req.body.isSelected;
+            }
 
             const updatedUser = await user.save();
 
