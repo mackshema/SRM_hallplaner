@@ -4,13 +4,17 @@ import {
   getFacultyHallSummary,
   generateSeatingPlan,
   getHallSeating,
-  getAllSeatAssignments
+  getAllSeatAssignments,
+  finalizeSeatingPlan
 } from "../controllers/seatingController.js";
 
 const router = express.Router();
 
 // ADMIN — generate seating plan for all halls
 router.post("/generate", generateSeatingPlan);
+
+// ADMIN — finalize seating plan
+router.post("/finalize", finalizeSeatingPlan);
 
 // ADMIN — save seating plan
 router.post("/save", saveSeatingPlan);

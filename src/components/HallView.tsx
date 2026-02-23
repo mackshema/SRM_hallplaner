@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { db, Hall, Department, SeatAssignment } from "@/lib/db";
+import { db, Hall, Department, SeatAssignment, User } from "@/lib/db";
 import { toast } from "@/components/ui/use-toast";
 import { useExam } from "@/context/ExamContext";
 import exportTableAsDoc from "@/lib/exportWord";
@@ -19,7 +19,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FileDown } from "lucide-react";
+import { FileDown, Users, Check, X } from "lucide-react";
+
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface HallViewProps {
   hallId: string;   // ✅ MongoDB ObjectId (Strict String)
@@ -43,6 +51,11 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
   const [seats, setSeats] = useState<StudentSeat[][]>([]);
   const [seatAssignments, setSeatAssignments] = useState<SeatAssignment[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Faculty State
+  const [facultyAssigned, setFacultyAssigned] = useState<string[]>([]);
+  const [allFaculty, setAllFaculty] = useState<User[]>([]);
+
   const [settings, setSettings] = useState<HeaderSettings>({
     institutionName: "",
     institutionSubtitle: "",
@@ -132,6 +145,11 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
         }
+
+        // Fetch Faculty List
+        const facultyList = await db.getAllFaculty();
+        setAllFaculty(facultyList);
+
       } catch (error) {
         console.error("Error fetching hall details:", error);
         setHall(null);
@@ -166,6 +184,9 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         if (data.examDate) setExamDate(data.examDate);
         if (data.examSession) setExamSession(data.examSession);
         if (data.examTime) setExamTime(data.examTime);
+
+        // Set Faculty Assignments
+        setFacultyAssigned(data.facultyAssigned || []);
 
         // Build grid with department names
         setSeats(buildGrid(assignments));
@@ -281,6 +302,55 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
 
 
 
+
+  /* ---------------------------------------------------------------------------
+     * FACULTY & FINALIZATION HANDLERS
+     * --------------------------------------------------------------------------- */
+
+  const handleAddFaculty = async (facultyId: string) => {
+    if (!facultyAssigned.includes(facultyId)) {
+      const newAssigned = [...facultyAssigned, facultyId];
+      setFacultyAssigned(newAssigned);
+      try {
+        await db.updateHallFaculty(hallId, newAssigned);
+        toast({ title: "Faculty Added", description: "Assignment updated.", duration: 2000 });
+      } catch (err) {
+        setFacultyAssigned(facultyAssigned); // Revert
+        toast({ title: "Error", description: "Failed to update.", variant: "destructive" });
+      }
+    }
+  };
+
+  const handleRemoveFaculty = async (facultyId: string) => {
+    const newAssigned = facultyAssigned.filter(id => id !== facultyId);
+    setFacultyAssigned(newAssigned);
+    try {
+      await db.updateHallFaculty(hallId, newAssigned);
+      toast({ title: "Faculty Removed", description: "Assignment updated.", duration: 2000 });
+    } catch (err) {
+      setFacultyAssigned(facultyAssigned); // Revert
+      toast({ title: "Error", description: "Failed to update.", variant: "destructive" });
+    }
+  };
+
+  const handleFinalize = async () => {
+    if (!examSessionId) {
+      toast({ title: "Error", description: "No exam session context found.", variant: "destructive" });
+      return;
+    }
+    if (confirm("Are you sure you want to finalize this exam plan? This action cannot be undone.")) {
+      try {
+        await db.finalizeExamSession(examSessionId);
+        toast({
+          title: "Exam Plan Finalized 🔒",
+          description: "Seating plan and faculty duties have been locked. Faculty notified."
+        });
+        window.location.reload();
+      } catch (err) {
+        toast({ title: "Error", description: "Failed to finalize plan.", variant: "destructive" });
+      }
+    }
+  };
 
   /* ---------------------------------------------------------------------------
      * EXPORT HANDLERS
@@ -1038,6 +1108,55 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
       {!readOnly && (
         <div className="flex justify-end mt-4">
           <Button onClick={saveAll} className="bg-blue-600">Save Configuration & Plan</Button>
+        </div>
+      )}
+
+      {/* FACULTY & FINALIZATION SECTION */}
+      {!readOnly && (
+        <div className="mt-8 border-t pt-6 pb-12">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Users className="h-5 w-5" /> Assigned Faculty (Required: {hall?.facultyRequired || 1})
+          </h3>
+
+          <div className="flex flex-wrap gap-4 mb-4">
+            {facultyAssigned.map(fId => {
+              const faculty = allFaculty.find(u => (u._id === fId || String(u.id) === String(fId)));
+              return (
+                <div key={fId} className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-200">
+                  <span className="text-sm font-medium">{faculty?.name || "Unknown Faculty"}</span>
+                  <button onClick={() => handleRemoveFaculty(fId)} className="text-blue-400 hover:text-red-500">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+
+            <Select onValueChange={(val) => handleAddFaculty(val)}>
+              <SelectTrigger className="w-[200px] h-8 rounded-full border-dashed">
+                <SelectValue placeholder="+ Add Faculty" />
+              </SelectTrigger>
+              <SelectContent>
+                {allFaculty.filter(f => !facultyAssigned.includes(String(f._id || f.id))).map(f => (
+                  <SelectItem key={f._id || f.id} value={String(f._id || f.id)}>
+                    {f.name} ({f.department || "No Dept"})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex justify-between items-center mt-6 p-4 bg-gray-50 rounded-lg border">
+            <div className="flex-grow">
+              <p className="text-sm text-gray-500 italic">
+                Changes to faculty assignments are saved automatically.
+              </p>
+            </div>
+            <div>
+              <Button onClick={handleFinalize} className="bg-red-600 hover:bg-red-700 text-white gap-2 shadow-lg">
+                <Check className="h-4 w-4" /> 🔴 Finalize Exam Plan
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

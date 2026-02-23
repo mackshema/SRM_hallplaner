@@ -82,6 +82,9 @@ export const updateUser = async (req, res) => {
             if (req.body.isSelected !== undefined) {
                 user.isSelected = req.body.isSelected;
             }
+            if (req.body.isSelectedForGeneration !== undefined) {
+                user.isSelectedForGeneration = req.body.isSelectedForGeneration;
+            }
 
             const updatedUser = await user.save();
 
@@ -92,7 +95,8 @@ export const updateUser = async (req, res) => {
                 username: updatedUser.username,
                 role: updatedUser.role,
                 department: updatedUser.department,
-                password: updatedUser.password
+                password: updatedUser.password,
+                isSelectedForGeneration: updatedUser.isSelectedForGeneration
             });
         } else {
             res.status(404).json({ message: "User not found" });

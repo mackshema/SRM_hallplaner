@@ -13,6 +13,13 @@ const FacultySchema = new mongoose.Schema({
       floor: String
     }
   ],
+  department: { type: String }, // Ensure department is here
+  email: { type: String },
+
+  // New Generation Fields
+  isSelectedForGeneration: { type: Boolean, default: false },
+  weeklyDutyCount: { type: Number, default: 0 },
+  lastDutyDate: { type: Date },
 
   active: { type: Boolean, default: true }
 });

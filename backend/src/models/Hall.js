@@ -22,6 +22,7 @@ const hallSchema = new mongoose.Schema({
   examSession: String,
   examTime: String,
 
+  facultyRequired: { type: Number, default: 1 }, // New Field
   isSelected: { type: Boolean, default: true },
 });
 

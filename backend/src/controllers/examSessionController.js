@@ -1,6 +1,7 @@
 import ExamSession from "../models/ExamSession.js";
 import SeatAssignment from "../models/SeatAssignment.js";
 import Hall from "../models/Hall.js";
+import FacultyDuty from "../models/FacultyDuty.js";
 
 /* ===============================
    GET ALL EXAM SESSIONS
@@ -18,6 +19,8 @@ export const getExamSessions = async (req, res) => {
 /* ===============================
    CREATE NEW EXAM SESSION
 ================================ */
+import Department from "../models/Department.js";
+
 export const createExamSession = async (req, res) => {
     try {
         const { examDate, examSession, examTime } = req.body;
@@ -28,17 +31,45 @@ export const createExamSession = async (req, res) => {
             return res.status(400).json({ error: "An exam session already exists for this date and time." });
         }
 
+        // Initialize with ALL currently available halls and departments
+        // This makes the transition seamless - new sessions start with everything active.
+        const allHalls = await Hall.find({}, '_id');
+        const allDepartments = await Department.find({}, '_id');
+
         const newSession = await ExamSession.create({
             examDate,
             examSession,
             examTime,
-            status: "DRAFT"
+            status: "DRAFT",
+            activeHalls: allHalls.map(h => h._id),
+            activeDepartments: allDepartments.map(d => d._id)
         });
 
         res.json(newSession);
     } catch (err) {
         console.error("Error creating exam session:", err);
         res.status(500).json({ error: "Failed to create exam session" });
+    }
+};
+
+/* ===============================
+   UPDATE EXAM SESSION
+================================ */
+export const updateExamSession = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body; // activeHalls, activeDepartments, etc.
+
+        const session = await ExamSession.findByIdAndUpdate(id, updates, { new: true });
+
+        if (!session) {
+            return res.status(404).json({ error: "Exam session not found" });
+        }
+
+        res.json(session);
+    } catch (err) {
+        console.error("Error updating exam session:", err);
+        res.status(500).json({ error: "Failed to update exam session" });
     }
 };
 
@@ -70,6 +101,9 @@ export const finalizeExamSession = async (req, res) => {
 /* ===============================
    UN-FINALIZE EXAM SESSION (Revert to Draft)
 ================================ */
+/* ===============================
+   UN-FINALIZE EXAM SESSION (Revert to Draft)
+   ================================ */
 export const unfinalizeExamSession = async (req, res) => {
     try {
         const { id } = req.params;
@@ -83,6 +117,12 @@ export const unfinalizeExamSession = async (req, res) => {
         if (!session) {
             return res.status(404).json({ error: "Exam session not found" });
         }
+
+        // Cleanup Duties
+        await FacultyDuty.deleteMany({
+            examDate: session.examDate,
+            examSession: session.examSession
+        });
 
         res.json(session);
     } catch (err) {
@@ -98,11 +138,15 @@ export const deleteExamSession = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // Delete session
-        await ExamSession.findByIdAndDelete(id);
-
-        // Delete associated seating assignments
-        await SeatAssignment.deleteMany({ examSessionId: id });
+        const session = await ExamSession.findById(id);
+        if (session) {
+            await FacultyDuty.deleteMany({
+                examDate: session.examDate,
+                examSession: session.examSession
+            });
+            await ExamSession.findByIdAndDelete(id);
+            await SeatAssignment.deleteMany({ examSessionId: id });
+        }
 
         res.json({ success: true });
     } catch (err) {

@@ -21,12 +21,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "@/components/ui/use-toast";
-import { db, Department, Hall, SeatAssignment } from "@/lib/db";
+import { db, Department, Hall, SeatAssignment, ExamSession } from "@/lib/db";
 import { FileDown } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Search } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 const DepartmentsManagement = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [halls, setHalls] = useState<Hall[]>([]);
@@ -39,22 +47,44 @@ const DepartmentsManagement = () => {
   const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const departmentsData = await db.getAllDepartments();
-        setDepartments(departmentsData);
+  const [examSessions, setExamSessions] = useState<ExamSession[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
 
-        const res = await fetch("http://localhost:5000/api/halls");
-        const hallsData = await res.json();
+  // Initial Load: Halls & Sessions
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const resHalls = await fetch("http://localhost:5000/api/halls");
+        const hallsData = await resHalls.json();
         setHalls(hallsData);
+
+        const sessionsData = await db.getExamSessions();
+        setExamSessions(sessionsData);
+        // Default to latest
+        if (sessionsData.length > 0) {
+          setSelectedSessionId(sessionsData[sessionsData.length - 1]._id);
+        }
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching initial data:", error);
       }
     };
-
-    fetchData();
+    fetchInitialData();
   }, []);
+
+  // Fetch Departments when Session Changes
+  useEffect(() => {
+    const fetchDepartments = async () => {
+      try {
+        // If no session selected, maybe fetch none? Or global?
+        // db.getAllDepartments handles optional arg.
+        const departmentsData = await db.getAllDepartments(selectedSessionId);
+        setDepartments(departmentsData);
+      } catch (error) {
+        console.error("Error fetching departments:", error);
+      }
+    };
+    fetchDepartments();
+  }, [selectedSessionId]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -71,6 +101,11 @@ const DepartmentsManagement = () => {
         description: "All fields are required",
         variant: "destructive",
       });
+      return;
+    }
+
+    if (!selectedSessionId) {
+      toast({ title: "Session Required", description: "Please select an exam session first.", variant: "destructive" });
       return;
     }
 
@@ -97,13 +132,16 @@ const DepartmentsManagement = () => {
         toast({ title: "Department updated successfully" });
       } else {
         // ➕ ADD new department
-        await db.createDepartment(formData);
+        await db.createDepartment({
+          ...formData,
+          examSessionId: selectedSessionId
+        });
 
         toast({ title: "Department added successfully" });
       }
 
       // 🔄 Reload departments
-      const updatedDepartments = await db.getAllDepartments();
+      const updatedDepartments = await db.getAllDepartments(selectedSessionId);
       setDepartments(updatedDepartments);
 
       // ♻ Reset dialog state
@@ -183,14 +221,18 @@ const DepartmentsManagement = () => {
 
   const handleDeleteDepartment = async (departmentId: string | number) => {
     try {
+      if (!selectedSessionId) {
+        toast({ title: "Session Required", variant: "destructive", description: "Please select an exam session." });
+        return;
+      }
       const success = await db.deleteDepartment(departmentId);
       if (!success) {
         toast({ title: "Failed to delete", description: "Department not found", variant: "destructive" });
         return;
       }
 
-      // Re-fetch departments from localStorage to ensure UI is in sync
-      const updatedDepartments = await db.getAllDepartments();
+      // Re-fetch departments for current session
+      const updatedDepartments = await db.getAllDepartments(selectedSessionId);
       setDepartments(updatedDepartments);
 
       toast({ title: "Department Deleted" });
@@ -202,6 +244,11 @@ const DepartmentsManagement = () => {
 
   const exportHallAllocation = async () => {
     try {
+      if (!selectedSessionId) {
+        toast({ title: "Session Required", variant: "destructive", description: "Please select an exam session to export." });
+        return;
+      }
+
       const doc = new jsPDF();
       const currentDateTime = new Date().toLocaleString('en-IN', {
         day: '2-digit',
@@ -214,14 +261,16 @@ const DepartmentsManagement = () => {
       doc.setFontSize(18);
       doc.text("Hall Allocation Report", 14, 22);
 
+      const session = examSessions.find(s => s._id === selectedSessionId);
       doc.setFontSize(12);
-      doc.text(`Generated on: ${currentDateTime}`, 14, 30);
+      doc.text(`Exam Session: ${session?.examDate} (${session?.examSession})`, 14, 30);
+      doc.text(`Generated on: ${currentDateTime}`, 14, 38);
 
       // Get seat assignments for all halls
       const allocationData: any[] = [];
 
       for (const hall of halls) {
-        const res = await fetch(`http://localhost:5000/api/seating/hall/${hall._id}`);
+        const res = await fetch(`http://localhost:5000/api/seating/hall/${hall._id}?examSessionId=${selectedSessionId}`);
         const data = await res.json();
         const assignments: SeatAssignment[] = data.assignments || [];
 
@@ -230,6 +279,8 @@ const DepartmentsManagement = () => {
 
         assignments.forEach(assignment => {
           if (!deptMap[assignment.departmentId]) {
+            // Find department locally (it should be in 'departments' if active in session)
+            // Note: If department was deleted but assignment exists, it might default?
             const dept = departments.find(d => (d._id || String(d.id)) === String(assignment.departmentId));
             deptMap[assignment.departmentId] = {
               dept,
@@ -251,6 +302,7 @@ const DepartmentsManagement = () => {
           }
         });
       }
+
 
       if (allocationData.length === 0) {
         toast({
@@ -285,50 +337,109 @@ const DepartmentsManagement = () => {
     }
   };
 
+  /* -------------------------------------------
+     SESSION & SELECTION LOGIC
+  @ ------------------------------------------- */
+
+  const isDepartmentActiveInSession = (deptId: string) => {
+    if (!selectedSessionId) {
+      const dept = departments.find(d => (d._id || String(d.id)) === deptId);
+      return dept ? dept.isSelected !== false : true;
+    }
+
+    const session = examSessions.find(s => s._id === selectedSessionId);
+    if (!session) return false;
+
+    // If activeDepartments is undefined (legacy sessions), assume ALL are active unless migrated
+    if (!session.activeDepartments) return true;
+
+    return session.activeDepartments.includes(deptId);
+  };
+
 
   const filteredDepartments = departments.filter(dept =>
     dept.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const allSelected = filteredDepartments.length > 0 && filteredDepartments.every(d => d.isSelected !== false);
+  const allSelected = filteredDepartments.length > 0 && filteredDepartments.every(d => isDepartmentActiveInSession(d._id || String(d.id)));
 
   const toggleSelection = async (dept: Department) => {
+    if (!selectedSessionId) {
+      toast({ title: "Select a Session", description: "Please select an exam session to manage active departments for that date.", variant: "destructive" });
+      return;
+    }
+
+    const session = examSessions.find(s => s._id === selectedSessionId);
+    if (!session) return;
+
+    const deptId = dept._id || String(dept.id);
+    const currentActive: string[] = session.activeDepartments || departments.map(d => d._id || String(d.id));
+    const isActive = currentActive.includes(deptId);
+
+    let newActive;
+    if (isActive) {
+      newActive = currentActive.filter(id => id !== deptId);
+    } else {
+      newActive = [...currentActive, deptId];
+    }
+
+    // Optimistic Update
+    const updatedSession = { ...session, activeDepartments: newActive };
+    setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
+
     try {
-      const id = dept._id || String(dept.id);
-      const newStatus = !(dept.isSelected !== false);
-
-      // Optimistic
-      setDepartments(prev => prev.map(d => (d._id || String(d.id)) === id ? { ...d, isSelected: newStatus } : d));
-
-      await fetch(`http://localhost:5000/api/departments/${id}`, {
+      await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isSelected: newStatus }),
+        body: JSON.stringify({ activeDepartments: newActive })
       });
     } catch (error) {
-      toast({ title: "Failed to update selection", variant: "destructive" });
+      console.error("Error updating session departments:", error);
+      toast({ title: "Update Failed", variant: "destructive" });
+      // Revert
+      setExamSessions(prev => prev.map(s => s._id === session._id ? session : s));
     }
   };
 
   const toggleAll = async () => {
-    const newStatus = !allSelected;
-    // Optimistic
-    setDepartments(prev => prev.map(d => {
-      if (filteredDepartments.some(fd => (fd._id || String(fd.id)) === (d._id || String(d.id)))) {
-        return { ...d, isSelected: newStatus };
-      }
-      return d;
-    }));
+    if (!selectedSessionId) {
+      toast({ title: "Select a Session", description: "Please select an exam session first.", variant: "destructive" });
+      return;
+    }
 
-    for (const dept of filteredDepartments) {
-      if ((dept.isSelected !== false) !== newStatus) {
-        const id = dept._id || String(dept.id);
-        await fetch(`http://localhost:5000/api/departments/${id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isSelected: newStatus }),
-        });
-      }
+    const session = examSessions.find(s => s._id === selectedSessionId);
+    if (!session) return;
+
+    const currentActive: string[] = session.activeDepartments || [];
+    const allFilteredAreActive = filteredDepartments.every(d => currentActive.includes(d._id || String(d.id)));
+    const targetState = !allFilteredAreActive;
+
+    let newActive = [...currentActive];
+
+    if (targetState) {
+      filteredDepartments.forEach(d => {
+        const id = d._id || String(d.id);
+        if (!newActive.includes(id)) newActive.push(id);
+      });
+    } else {
+      const filteredIds = filteredDepartments.map(d => d._id || String(d.id));
+      newActive = newActive.filter(id => !filteredIds.includes(id));
+    }
+
+    // Optimistic
+    const updatedSession = { ...session, activeDepartments: newActive };
+    setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
+
+    try {
+      await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeDepartments: newActive })
+      });
+    } catch (error) {
+      console.error("Error updating session departments:", error);
+      toast({ title: "Update Failed", variant: "destructive" });
+      setExamSessions(prev => prev.map(s => s._id === session._id ? session : s));
     }
   };
 
@@ -340,7 +451,24 @@ const DepartmentsManagement = () => {
           <p className="text-gray-600">Add and manage departments and roll number ranges</p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {/* SESSION SELECTOR */}
+          <Select
+            value={selectedSessionId}
+            onValueChange={setSelectedSessionId}
+          >
+            <SelectTrigger className="w-[250px]">
+              <SelectValue placeholder="Select Session Context" />
+            </SelectTrigger>
+            <SelectContent>
+              {examSessions.map(s => (
+                <SelectItem key={s._id} value={s._id}>
+                  {s.examDate} ({s.examSession}) - {s.status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button>Add Department</Button>
@@ -437,11 +565,11 @@ const DepartmentsManagement = () => {
               filteredDepartments.map((department) => (
                 <TableRow
                   key={department._id || department.id}
-                  className={`transition-opacity duration-200 ${department.isSelected === false ? "opacity-50 grayscale bg-gray-50" : ""}`}
+                  className={`transition-opacity duration-200 ${!isDepartmentActiveInSession(department._id || String(department.id)) ? "opacity-50 grayscale bg-gray-50" : ""}`}
                 >
                   <TableCell>
                     <Checkbox
-                      checked={department.isSelected !== false}
+                      checked={isDepartmentActiveInSession(department._id || String(department.id))}
                       onCheckedChange={() => toggleSelection(department)}
                     />
                   </TableCell>

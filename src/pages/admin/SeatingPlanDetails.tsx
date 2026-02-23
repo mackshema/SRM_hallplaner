@@ -30,7 +30,12 @@ const SeatingPlanDetails = () => {
 
       try {
         // ✅ CHANGED: Fetch directly from Backend API (Single Source of Truth)
-        const res = await fetch(`http://localhost:5000/api/halls/${id}`);
+        const sessionId = searchParams.get("examSessionId");
+        let url = `http://localhost:5000/api/halls/${id}`;
+        if (sessionId) {
+          url += `?examSessionId=${sessionId}`;
+        }
+        const res = await fetch(url);
 
         if (!res.ok) {
           if (res.status === 404) {

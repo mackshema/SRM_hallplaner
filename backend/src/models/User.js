@@ -11,6 +11,11 @@ const userSchema = new mongoose.Schema(
       default: "faculty"
     },
     department: { type: String }, // Optional for faculty
+    // New Generation Fields for Faculty
+    isSelectedForGeneration: { type: Boolean, default: false },
+    weeklyDutyCount: { type: Number, default: 0 },
+    lastDutyDate: { type: Date },
+
     isSelected: { type: Boolean, default: true },
   },
   { timestamps: true }

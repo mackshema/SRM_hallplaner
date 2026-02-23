@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { db, Hall, User } from "@/lib/db";
+import { db, Hall, User, ExamSession } from "@/lib/db";
 import { toast } from "@/components/ui/use-toast";
 import { FileDown, Pencil, Eye } from "lucide-react";
 import jsPDF from "jspdf";
@@ -57,30 +57,68 @@ const FacultyManagement = () => {
     examName: ""
   });
 
+  // Session State
+  const [examSessions, setExamSessions] = useState<ExamSession[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
+
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchInitialData = async () => {
       try {
         const facultyData = await db.getAllFaculty();
         setFaculty(facultyData);
-
-        const res = await fetch("http://localhost:5000/api/halls");
-        const hallsData = await res.json();
-        setHalls(hallsData);
 
         const settingsRes = await fetch("http://localhost:5000/api/settings");
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
         }
+
+        // Fetch Sessions
+        const sessionsRes = await fetch("http://localhost:5000/api/exam-sessions");
+        if (sessionsRes.ok) {
+          const sessionsData = await sessionsRes.json();
+          setExamSessions(sessionsData);
+          // Default to latest session
+          if (sessionsData.length > 0) {
+            setSelectedSessionId(prev => prev || sessionsData[sessionsData.length - 1]._id);
+          }
+        }
+
       } catch (error) {
-        console.error("Error fetching faculty data:", error);
+        console.error("Error fetching initial data:", error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
+    fetchInitialData();
   }, []);
+
+  // Fetch Halls when session changes
+  useEffect(() => {
+    const fetchHalls = async () => {
+      // If we don't have a session ID yet (and sessions exist), wait. 
+      // But if there are no sessions, we might still want to fetch halls (default/raw).
+      // For now, let's fetch always, adding param if exists.
+
+      try {
+        let url = "http://localhost:5000/api/halls";
+        if (selectedSessionId) {
+          url += `?examSessionId=${selectedSessionId}`;
+        }
+
+        const res = await fetch(url);
+        if (res.ok) {
+          const hallsData = await res.json();
+          setHalls(hallsData);
+        }
+      } catch (error) {
+        console.error("Error fetching halls:", error);
+      }
+    };
+
+    fetchHalls();
+  }, [selectedSessionId]);
 
   // Function to get assigned halls for each faculty member
   const getAssignedHalls = (member: User): Hall[] => {
@@ -289,47 +327,66 @@ const FacultyManagement = () => {
     }
   };
 
+  const currentSession = examSessions.find(s => s._id === selectedSessionId);
+
+  const isFacultySelectedForSession = (memberId: string) => {
+    if (!currentSession || !currentSession.selectedFaculty) return false;
+    return currentSession.selectedFaculty.includes(memberId);
+  };
+
   const filteredFaculty = faculty.filter(f =>
     f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (f.department && f.department.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const allSelected = filteredFaculty.length > 0 && filteredFaculty.every(f => f.isSelected !== false);
+  const allSelected = filteredFaculty.length > 0 && filteredFaculty.every(f => isFacultySelectedForSession(f._id || ""));
 
   const toggleSelection = async (member: User) => {
     try {
-      const id = member._id || member.id;
-      if (!id) return;
+      const fId = String(member._id || member.id);
+      if (!fId || fId === "undefined" || !selectedSessionId || !currentSession) return;
 
-      const newStatus = !(member.isSelected !== false);
+      const isSelected = isFacultySelectedForSession(fId);
+      let newSelectedFaculty = currentSession.selectedFaculty || [];
 
-      // Optimistic
-      setFaculty(prev => prev.map(f => (f._id || f.id) === id ? { ...f, isSelected: newStatus } : f));
+      if (isSelected) {
+        newSelectedFaculty = newSelectedFaculty.filter(id => id !== fId);
+      } else {
+        newSelectedFaculty = [...newSelectedFaculty, fId];
+      }
 
-      await db.updateFaculty(id, { isSelected: newStatus });
+      // Optimistic update
+      setExamSessions(prev => prev.map(s => s._id === selectedSessionId ? { ...s, selectedFaculty: newSelectedFaculty } : s));
+
+      await db.updateExamSession(selectedSessionId, { selectedFaculty: newSelectedFaculty });
     } catch (error) {
       toast({ title: "Failed to update selection", variant: "destructive" });
     }
   };
 
   const toggleAll = async () => {
-    const newStatus = !allSelected;
-    // Optimistic
-    setFaculty(prev => prev.map(f => {
-      const id = f._id || f.id;
-      if (filteredFaculty.some(ff => (ff._id || ff.id) === id)) {
-        return { ...f, isSelected: newStatus };
-      }
-      return f;
-    }));
+    try {
+      if (!selectedSessionId || !currentSession) return;
+      const newStatus = !allSelected;
 
-    for (const member of filteredFaculty) {
-      const id = member._id || member.id;
-      if (!id) continue;
+      let newSelectedFaculty = currentSession.selectedFaculty || [];
+      const filteredIds = filteredFaculty.map(f => String(f._id || f.id)).filter(Boolean);
 
-      if ((member.isSelected !== false) !== newStatus) {
-        await db.updateFaculty(id, { isSelected: newStatus });
+      if (newStatus) {
+        // Add all filtered that aren't already there
+        const toAdd = filteredIds.filter(id => !newSelectedFaculty.includes(id));
+        newSelectedFaculty = [...newSelectedFaculty, ...toAdd];
+      } else {
+        // Remove all filtered from selection
+        newSelectedFaculty = newSelectedFaculty.filter(id => !filteredIds.includes(id));
       }
+
+      // Optimistic
+      setExamSessions(prev => prev.map(s => s._id === selectedSessionId ? { ...s, selectedFaculty: newSelectedFaculty } : s));
+
+      await db.updateExamSession(selectedSessionId, { selectedFaculty: newSelectedFaculty });
+    } catch (error) {
+      toast({ title: "Failed to update all selections", variant: "destructive" });
     }
   };
 
@@ -342,10 +399,37 @@ const FacultyManagement = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Faculty Management</h1>
-          <p className="text-gray-600">View faculty members and their assigned exam halls</p>
+          <p className="text-gray-600">Select faculty for automated exam assignment and view their duties</p>
         </div>
 
         <div className="flex gap-2">
+          {/* SESSION SELECTOR */}
+          <div className="flex flex-col items-end mr-4">
+            <select
+              className="border p-2 rounded-md bg-white text-sm min-w-[200px]"
+              value={selectedSessionId}
+              onChange={(e) => setSelectedSessionId(e.target.value)}
+            >
+              <option value="" disabled>Select Session Context</option>
+              {examSessions.map(s => (
+                <option key={s._id} value={s._id}>
+                  {s.examDate} ({s.examSession}) - {s.status}
+                </option>
+              ))}
+            </select>
+            {(() => {
+              const selected = examSessions.find(s => s._id === selectedSessionId);
+              if (selected) {
+                return (
+                  <span className={`text-xs mt-1 px-2 py-0.5 rounded-full ${selected.status === 'FINAL' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                    {selected.status === 'FINAL' ? 'Locked Plan' : 'Draft Mode'}
+                  </span>
+                );
+              }
+              return null;
+            })()}
+          </div>
+
           <Button variant="outline" onClick={exportFacultyHallAllocation}>
             <FileDown className="mr-2 h-4 w-4" />
             Export Allocation
@@ -526,12 +610,12 @@ const FacultyManagement = () => {
             ) : (
               filteredFaculty.map(member => (
                 <TableRow
-                  key={member.id}
-                  className={`transition-opacity duration-200 ${member.isSelected === false ? "opacity-50 grayscale bg-gray-50" : ""}`}
+                  key={member.id || member._id}
+                  className={`transition-opacity duration-200 ${!isFacultySelectedForSession(String(member._id || member.id)) ? "opacity-50 grayscale bg-gray-50" : ""}`}
                 >
                   <TableCell>
                     <Checkbox
-                      checked={member.isSelected !== false}
+                      checked={isFacultySelectedForSession(String(member._id || member.id))}
                       onCheckedChange={() => toggleSelection(member)}
                     />
                   </TableCell>
@@ -586,8 +670,8 @@ const FacultyManagement = () => {
       <div className="p-4 bg-gray-50 rounded-lg">
         <h3 className="font-semibold mb-2">Note:</h3>
         <p className="text-gray-600">
-          Faculty members can be assigned to halls when creating or editing an exam hall.
-          Each faculty member can view the seating plans for their assigned halls when they log in.
+          Only checked faculty members will be considered for automatic exam duty allocation.
+          The automation system enforces a maximum of 4 duties per week and prevents back-to-back session assignments.
         </p>
       </div>
     </div>

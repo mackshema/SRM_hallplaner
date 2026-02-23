@@ -11,6 +11,7 @@ export interface User {
   role: 'admin' | 'faculty';
   department?: string;
   isSelected?: boolean;
+  isSelectedForGeneration?: boolean;
 }
 
 export interface Department {
@@ -38,6 +39,7 @@ export interface Hall {
 
   floor?: string;
   facultyAssigned?: string[];
+  facultyRequired?: number; // New Field
 
   examDate?: string;
   examSession?: "FN" | "AN";
@@ -66,6 +68,9 @@ export interface ExamSession {
   examTime: string;
   status: "DRAFT" | "FINAL";
   finalizedAt?: string;
+  activeHalls?: string[];
+  activeDepartments?: string[];
+  selectedFaculty?: string[];
 }
 
 class DatabaseService {
@@ -104,8 +109,10 @@ class DatabaseService {
   }
 
   async finalizeExamSession(id: string): Promise<ExamSession> {
-    const res = await fetch(`${this.apiUrl}/exam-sessions/${id}/finalize`, {
-      method: "PUT",
+    const res = await fetch(`${this.apiUrl}/seating/finalize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ examSessionId: id })
     });
     if (!res.ok) throw new Error("Failed to finalize exam session");
     return await res.json();
@@ -124,6 +131,16 @@ class DatabaseService {
       method: "DELETE",
     });
     if (!res.ok) throw new Error("Failed to delete exam session");
+  }
+
+  async updateExamSession(id: string, data: Partial<ExamSession>): Promise<ExamSession> {
+    const res = await fetch(`${this.apiUrl}/exam-sessions/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error("Failed to update exam session");
+    return await res.json();
   }
 
   // ------------------------------------------------------------------
@@ -227,9 +244,13 @@ class DatabaseService {
   // DEPARTMENTS
   // ------------------------------------------------------------------
 
-  async getAllDepartments(): Promise<Department[]> {
+  async getAllDepartments(examSessionId?: string): Promise<Department[]> {
     try {
-      const res = await fetch(`${this.apiUrl}/departments`);
+      const url = examSessionId
+        ? `${this.apiUrl}/departments?examSessionId=${examSessionId}`
+        : `${this.apiUrl}/departments`;
+
+      const res = await fetch(url);
       return res.ok ? await res.json() : [];
     } catch {
       return [];
@@ -244,6 +265,7 @@ class DatabaseService {
     name: string;
     rollNumberStart: string;
     rollNumberEnd: string;
+    examSessionId?: string;
   }): Promise<Department> {
     const res = await fetch(`${this.apiUrl}/departments`, {
       method: "POST",
@@ -320,10 +342,22 @@ class DatabaseService {
   async generateAllSeatingPlans(
     examSessionId: string,
     skipRollNumbers: string[] = [],
-    manualRollNumbers: string[] = []
-  ): Promise<{ success: boolean; unallocated: string[] }> {
+    manualRollNumbers: string[] = [],
+    demandFacultyIds: string[] = []
+  ): Promise<{ success: boolean; unallocated: string[]; allocationResult?: any }> {
     try {
-      const departments = await this.getAllDepartments();
+      // Fetch session to determine active departments
+      const sessions = await this.getExamSessions();
+      const session = sessions.find(s => s._id === examSessionId);
+
+      let departments = await this.getAllDepartments();
+
+      if (session?.activeDepartments && session.activeDepartments.length > 0) {
+        departments = departments.filter(d => session.activeDepartments!.includes(d._id || String(d.id)));
+      } else {
+        // Fallback to isSelected if no session active list (legacy behavior)
+        departments = departments.filter(d => d.isSelected !== false);
+      }
 
       const res = await fetch(`${this.apiUrl}/seating/generate`, {
         method: "POST",
@@ -336,7 +370,8 @@ class DatabaseService {
             rollNumberEnd: dept.rollNumberEnd
           })),
           skipRollNumbers,
-          manualRollNumbers
+          manualRollNumbers,
+          demandFacultyIds
         })
       });
 
@@ -349,7 +384,8 @@ class DatabaseService {
       const data = await res.json();
       return {
         success: data.success || false,
-        unallocated: data.unallocated || []
+        unallocated: data.unallocated || [],
+        allocationResult: data.allocationResult
       };
     } catch (error) {
       console.error("Error generating plans:", error);
@@ -372,6 +408,15 @@ class DatabaseService {
     } catch {
       return [];
     }
+  }
+
+  async updateHallFaculty(hallId: string, facultyIds: string[]): Promise<void> {
+    const res = await fetch(`${this.apiUrl}/halls/${hallId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ facultyAssigned: facultyIds })
+    });
+    if (!res.ok) throw new Error("Failed to update hall faculty");
   }
 }
 

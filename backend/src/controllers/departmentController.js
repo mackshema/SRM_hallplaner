@@ -4,7 +4,28 @@ import Department from "../models/Department.js";
 // @route   GET /api/departments
 export const getDepartments = async (req, res) => {
     try {
-        const departments = await Department.find({});
+        const { examSessionId } = req.query;
+        // If examSessionId is provided, filter by it.
+        // If not provided, should we return global ones (where examSessionId is null/undefined)?
+        // For now, let's support flexible filtering.
+        // If specifically '', return globals? Or maybe all?
+        // Let's assume strict filtering if param exists.
+
+        let filter = {};
+        if (examSessionId) {
+            filter = {
+                $or: [
+                    { examSessionId: examSessionId },
+                    { examSessionId: { $exists: false } },
+                    { examSessionId: null }
+                ]
+            };
+        } else {
+            // If no session specified, return all (global + all specific) or just global?
+            // For admin safety, maybe just return all so they can see everything.
+        }
+
+        const departments = await Department.find(filter);
         res.json(departments);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -14,13 +35,14 @@ export const getDepartments = async (req, res) => {
 // @desc    Create a department
 // @route   POST /api/departments
 export const createDepartment = async (req, res) => {
-    const { name, rollNumberStart, rollNumberEnd } = req.body;
+    const { name, rollNumberStart, rollNumberEnd, examSessionId } = req.body;
 
     try {
         const department = new Department({
             name,
             rollNumberStart,
             rollNumberEnd,
+            examSessionId
         });
 
         const createdDepartment = await department.save();

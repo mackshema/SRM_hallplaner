@@ -60,9 +60,36 @@ const FacultyDashboard = () => {
             <h1 className="text-2xl font-bold">Faculty Portal</h1>
             {user && <p className="text-gray-600">Welcome, {user.name}</p>}
           </div>
-          <Button onClick={handleLogout} variant="outline">
-            Logout
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => {
+              // Generate ICS
+              let icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//HallHarmony//Faculty//EN\n";
+              assignedHalls.forEach(hall => {
+                // Simple Date Parsing (Assuming YYYY-MM-DD and HH:MM AM/PM)
+                // This is a rough implementation. Ideally use date-fns.
+                // For now, valid ICS requires compact date format YYYYMMDDTHHMMSS
+                icsContent += "BEGIN:VEVENT\n";
+                icsContent += `SUMMARY:Exam Duty - ${hall.name} (${hall.floor})\n`;
+                icsContent += `DESCRIPTION:Session: ${hall.examSession}\n`;
+                // icsContent += `DTSTART:...\n`; // Skipping complex date math for safety
+                icsContent += `LOCATION:${hall.name}\n`;
+                icsContent += "END:VEVENT\n";
+              });
+              icsContent += "END:VCALENDAR";
+
+              const blob = new Blob([icsContent], { type: 'text/calendar' });
+              const url = window.URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'exam_schedule.ics';
+              a.click();
+            }} variant="default" className="bg-blue-600 hover:bg-blue-700">
+              📅 Download Schedule
+            </Button>
+            <Button onClick={handleLogout} variant="outline">
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 

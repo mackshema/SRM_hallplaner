@@ -1,4 +1,6 @@
 import Hall from "../models/Hall.js";
+import FacultyDuty from "../models/FacultyDuty.js";
+import ExamSession from "../models/ExamSession.js";
 
 export const createHall = async (req, res) => {
   try {
@@ -9,7 +11,8 @@ export const createHall = async (req, res) => {
       seatsPerBench,
       floor,
       facultyAssigned = [],
-      extraBenches = []
+      extraBenches = [],
+      facultyRequired = 1 // Default to 1
     } = req.body;
 
     // Validate required fields
@@ -47,7 +50,8 @@ export const createHall = async (req, res) => {
       seatsPerBench,
       floor,
       facultyAssigned: normalizedFacultyAssigned,
-      extraBenches
+      extraBenches,
+      facultyRequired: Number(facultyRequired) || 1
     });
 
     res.status(201).json(hall);
@@ -91,7 +95,42 @@ export const createHall = async (req, res) => {
 ================================ */
 export const getAllHalls = async (req, res) => {
   try {
-    const halls = await Hall.find();
+    const { examSessionId } = req.query;
+    let halls = await Hall.find().lean(); // Use lean for easier modification
+
+    if (examSessionId) {
+      const session = await ExamSession.findById(examSessionId);
+      if (session) {
+        if (session.status === 'FINAL') {
+          // Fetch duties for this FINAL session
+          const duties = await FacultyDuty.find({
+            examDate: session.examDate,
+            examSession: session.examSession
+          });
+
+          // Map duties to halls
+          // Create a map: hallId -> [facultyIds]
+          const dutyMap = {};
+          duties.forEach(d => {
+            const hId = d.hallId.toString();
+            if (!dutyMap[hId]) dutyMap[hId] = [];
+            dutyMap[hId].push(d.facultyId);
+          });
+
+          // Override hall.facultyAssigned
+          halls = halls.map(h => ({
+            ...h,
+            facultyAssigned: dutyMap[h._id.toString()] || []
+          }));
+        } else {
+          // If DRAFT, we assume Hall.facultyAssigned is the current working state.
+          // No change needed as Hall.facultyAssigned is already there.
+          // However, if we wanted to be strict that Hall.facultyAssigned belongs to the *latest* draft...
+          // For now, we leave it as is.
+        }
+      }
+    }
+
     res.json(halls);
   } catch (error) {
     console.error("Get halls error:", error);
@@ -102,13 +141,36 @@ export const getAllHalls = async (req, res) => {
 /* ===============================
    GET HALL BY ID
 ================================ */
+/* ===============================
+   GET HALL BY ID
+================================ */
 export const getHallById = async (req, res) => {
   try {
     const { id } = req.params;
-    const hall = await Hall.findById(id);
+    const { examSessionId } = req.query;
+
+    let hall = await Hall.findById(id).lean();
 
     if (!hall) {
       return res.status(404).json({ message: "Hall not found" });
+    }
+
+    if (examSessionId) {
+      const session = await ExamSession.findById(examSessionId);
+      if (session && session.status === 'FINAL') {
+        // Fetch duties for this FINAL session
+        const duties = await FacultyDuty.find({
+          examDate: session.examDate,
+          examSession: session.examSession,
+          hallId: hall._id
+        });
+
+        // Override facultyAssigned
+        hall = {
+          ...hall,
+          facultyAssigned: duties.map(d => d.facultyId.toString())
+        };
+      }
     }
 
     res.json(hall);
@@ -173,7 +235,8 @@ export const updateHall = async (req, res) => {
       seatsPerBench,
       floor,
       facultyAssigned,
-      extraBenches
+      extraBenches,
+      facultyRequired
     } = req.body;
 
     const hall = await Hall.findById(id);
@@ -186,6 +249,11 @@ export const updateHall = async (req, res) => {
     hall.columns = columns || hall.columns;
     hall.seatsPerBench = seatsPerBench || hall.seatsPerBench;
     hall.floor = floor || hall.floor;
+
+    if (facultyRequired !== undefined) {
+      hall.facultyRequired = Number(facultyRequired);
+    }
+
     if (facultyAssigned !== undefined) {
       hall.facultyAssigned = Array.isArray(facultyAssigned)
         ? facultyAssigned.map(f => String(f))

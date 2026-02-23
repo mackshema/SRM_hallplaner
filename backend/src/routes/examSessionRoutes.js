@@ -2,6 +2,7 @@ import express from "express";
 import {
     getExamSessions,
     createExamSession,
+    updateExamSession,
     finalizeExamSession,
     unfinalizeExamSession,
     deleteExamSession,
@@ -11,6 +12,7 @@ const router = express.Router();
 
 router.get("/", getExamSessions);
 router.post("/", createExamSession);
+router.put("/:id", updateExamSession);
 router.put("/:id/finalize", finalizeExamSession);
 router.put("/:id/unfinalize", unfinalizeExamSession);
 router.delete("/:id", deleteExamSession);

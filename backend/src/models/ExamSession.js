@@ -7,6 +7,10 @@ const examSessionSchema = new mongoose.Schema(
         examTime: { type: String, required: true },
         status: { type: String, enum: ["DRAFT", "FINAL"], default: "DRAFT" },
         finalizedAt: Date,
+        // Configuration specific to this session
+        activeHalls: [{ type: mongoose.Schema.Types.ObjectId, ref: "Hall" }],
+        activeDepartments: [{ type: mongoose.Schema.Types.ObjectId, ref: "Department" }],
+        selectedFaculty: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     },
     { timestamps: true }
 );

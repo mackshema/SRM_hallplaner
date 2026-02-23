@@ -179,7 +179,12 @@ const SeatingPlans = () => {
     });
   };
 
-  const handleGenerateAllSeatingPlans = async () => {
+  const [showShortageDialog, setShowShortageDialog] = useState(false);
+  const [allocationWarnings, setAllocationWarnings] = useState<string[]>([]);
+  const [facultySuggestions, setFacultySuggestions] = useState<any[]>([]);
+  const [tempDemandFacultyIds, setTempDemandFacultyIds] = useState<string[]>([]);
+
+  const handleGenerateAllSeatingPlans = async (demandOverride: string[] = []) => {
     if (!selectedSessionId) {
       toast({ title: "Error", description: "No exam session selected", variant: "destructive" });
       return;
@@ -190,18 +195,32 @@ const SeatingPlans = () => {
       const result = await db.generateAllSeatingPlans(
         selectedSessionId,
         skipRollNumbers,
-        manualRollNumbers
+        manualRollNumbers,
+        demandOverride
       );
 
       if (result.success) {
-        toast({
-          title: "Success",
-          description: "Seating plans generated successfully.",
-        });
-
         if (result.unallocated && result.unallocated.length > 0) {
           setUnallocatedStudents(result.unallocated);
           setShowUnallocatedDialog(true);
+        }
+
+        if (result.allocationResult?.shortage) {
+          toast({
+            title: "Partial Generation",
+            description: "Students allocated, but some halls have faculty shortages.",
+            variant: "default",
+          });
+          setAllocationWarnings(result.allocationResult.warnings);
+          setFacultySuggestions(result.allocationResult.suggestions);
+          setTempDemandFacultyIds(demandOverride);
+          setShowShortageDialog(true);
+        } else {
+          toast({
+            title: "Success",
+            description: "Seating plans and faculty allocated successfully.",
+          });
+          setShowShortageDialog(false);
         }
       } else {
         toast({
@@ -220,6 +239,17 @@ const SeatingPlans = () => {
     } finally {
       setGenerating(false);
     }
+  };
+
+  const handleApplyDemand = () => {
+    setShowShortageDialog(false);
+    handleGenerateAllSeatingPlans(tempDemandFacultyIds);
+  };
+
+  const toggleDemandFaculty = (id: string) => {
+    setTempDemandFacultyIds(prev =>
+      prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
+    );
   };
 
   const exportConsolidatedPlan = async () => {
@@ -440,7 +470,7 @@ const SeatingPlans = () => {
           </Button>
 
           <Button
-            onClick={handleGenerateAllSeatingPlans}
+            onClick={() => handleGenerateAllSeatingPlans([])}
             disabled={generating || halls.length === 0 || !selectedSessionId || isFinalized}
             className="gap-2"
             variant={isFinalized ? "secondary" : "default"}
@@ -602,6 +632,57 @@ const SeatingPlans = () => {
           </div>
           <AlertDialogFooter>
             <AlertDialogAction>Close</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Faculty Shortage / Demand Dialog */}
+      <AlertDialog open={showShortageDialog} onOpenChange={setShowShortageDialog}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-orange-600 flex items-center gap-2">
+              Faculty Allocation Shortage
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The system could not fulfill all faculty requirements based on existing rules (e.g., max 4 duties/week, no continuous sessions).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="bg-orange-50 p-3 rounded border border-orange-200 text-sm">
+              <p className="font-bold mb-1">Warnings:</p>
+              <ul className="list-disc pl-5">
+                {allocationWarnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+
+            <div>
+              <p className="text-sm font-bold mb-2">Available Faculty for Force Assignment (Demand):</p>
+              <div className="max-h-60 overflow-y-auto border rounded-md p-2 grid grid-cols-2 gap-2">
+                {facultySuggestions.map((f) => (
+                  <div key={f.id} className="flex items-center gap-2 border p-2 rounded hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      id={`suggest-${f.id}`}
+                      checked={tempDemandFacultyIds.includes(f.id)}
+                      onChange={() => toggleDemandFaculty(f.id)}
+                    />
+                    <label htmlFor={`suggest-${f.id}`} className="text-xs cursor-pointer">
+                      <span className="font-semibold block">{f.name}</span>
+                      <span className="text-gray-500">{f.department}</span>
+                    </label>
+                  </div>
+                ))}
+                {facultySuggestions.length === 0 && <p className="text-sm italic text-gray-500 col-span-2 text-center py-4">No other available faculty found. Please add new faculty in the Faculty tab.</p>}
+              </div>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <Button variant="ghost" onClick={() => setShowShortageDialog(false)}>Ignore & Keep Current</Button>
+            <Button onClick={handleApplyDemand} className="bg-orange-600 hover:bg-orange-700 text-white">
+              Confirm & Re-run (Apply Demand)
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
