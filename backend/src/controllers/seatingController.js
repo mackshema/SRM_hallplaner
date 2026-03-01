@@ -144,16 +144,8 @@ export const getFacultyHallSummary = async (req, res) => {
     // 1. Get finalized duties
     const duties = await FacultyDuty.find({ facultyId }).populate('hallId');
 
-    // 2. Filter & Sort for UPCOMING/CURRENT duties only
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Start of today
-
-    const upcomingDuties = duties.filter(d => {
-      // Parse examDate. Format could be YYYY-MM-DD or DD-MM-YYYY or ISO
-      // Assuming ISO YYYY-MM-DD for consistency based on input type='date'
-      const dDate = new Date(d.examDate);
-      return dDate >= today;
-    }).sort((a, b) => new Date(a.examDate) - new Date(b.examDate));
+    // 2. Sort duties by date (do not filter out past dates as faculty should see their history or test data)
+    const upcomingDuties = duties.sort((a, b) => new Date(b.examDate) - new Date(a.examDate));
 
     // Transform to summary format
     const summary = upcomingDuties.map(duty => ({

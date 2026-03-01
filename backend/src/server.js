@@ -11,6 +11,8 @@ import userRoutes from "./routes/userRoutes.js";
 import departmentRoutes from "./routes/departmentRoutes.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
 import examSessionRoutes from "./routes/examSessionRoutes.js";
+import studentRoutes from "./routes/studentRoutes.js";
+import exportRoutes from "./routes/exportRoutes.js";
 
 
 dotenv.config();
@@ -31,6 +33,8 @@ app.use("/api/halls", hallRoutes); // Halls
 app.use("/api/seating", seatingRoutes); // Seating Logic
 app.use("/api/settings", settingsRoutes); // Global Settings
 app.use("/api/exam-sessions", examSessionRoutes); // Exam Sessions
+app.use("/api/student", studentRoutes); // Public Student Lookup
+app.use("/api/export", exportRoutes); // Zipped Document exports
 
 
 //  TEST ROUTE

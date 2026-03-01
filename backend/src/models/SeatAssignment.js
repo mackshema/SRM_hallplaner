@@ -29,4 +29,7 @@ const seatAssignmentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Index for student lookup
+seatAssignmentSchema.index({ studentRollNumber: 1 });
+
 export default mongoose.model("SeatAssignment", seatAssignmentSchema);

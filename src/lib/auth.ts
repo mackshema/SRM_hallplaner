@@ -2,7 +2,8 @@
 import { db } from './db';
 
 export interface User {
-  id: number;
+  id?: number;
+  _id?: string;
   name: string;
   username: string;
   role: 'admin' | 'faculty';
@@ -16,14 +17,14 @@ export async function loginUser(username: string, password: string): Promise<Use
     // In a real application, this would be a database query with password hashing
     // For this demo, we'll simulate a database lookup
     const user = await db.getUserByCredentials(username, password);
-    
+
     if (user) {
       // Store the user in memory/session
       currentUser = user;
       localStorage.setItem('currentUser', JSON.stringify(user));
       return user;
     }
-    
+
     return null;
   } catch (error) {
     console.error("Login error:", error);
@@ -33,14 +34,14 @@ export async function loginUser(username: string, password: string): Promise<Use
 
 export function getCurrentUser(): User | null {
   if (currentUser) return currentUser;
-  
+
   // Try to get from localStorage
   const storedUser = localStorage.getItem('currentUser');
   if (storedUser) {
     currentUser = JSON.parse(storedUser);
     return currentUser;
   }
-  
+
   return null;
 }
 

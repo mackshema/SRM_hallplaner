@@ -1,0 +1,68 @@
+[
+  {
+    "_id": "69a3f93f6bae2f3cffe4a375",
+    "facultyId": "6979cb431f01aa5e56c46196",
+    "hallId": "698eeeb31e785a2d083089f1",
+    "examDate": "2026-01-28",
+    "examSession": "FN",
+    "examTime": "09:30 AM",
+    "__v": 0,
+    "createdAt": "2026-03-01T08:30:55.945Z",
+    "updatedAt": "2026-03-01T08:30:55.945Z"
+  },
+  {
+    "_id": "69a3f93f6bae2f3cffe4a376",
+    "facultyId": "6981c86a847d92630bf969d4",
+    "hallId": "698eeecb1e785a2d083089f3",
+    "examDate": "2026-01-28",
+    "examSession": "FN",
+    "examTime": "09:30 AM",
+    "__v": 0,
+    "createdAt": "2026-03-01T08:30:55.946Z",
+    "updatedAt": "2026-03-01T08:30:55.946Z"
+  },
+  {
+    "_id": "69a3f93f6bae2f3cffe4a377",
+    "facultyId": "6979cb591f01aa5e56c4619e",
+    "hallId": "6990a7618de184fc55eaa3a0",
+    "examDate": "2026-01-28",
+    "examSession": "FN",
+    "examTime": "09:30 AM",
+    "__v": 0,
+    "createdAt": "2026-03-01T08:30:55.946Z",
+    "updatedAt": "2026-03-01T08:30:55.946Z"
+  },
+  {
+    "_id": "69a3f9436bae2f3cffe4a388",
+    "facultyId": "6979cb431f01aa5e56c46196",
+    "hallId": "698eeeb31e785a2d083089f1",
+    "examDate": "2026-01-29",
+    "examSession": "FN",
+    "examTime": "09:30 AM",
+    "__v": 0,
+    "createdAt": "2026-03-01T08:30:59.797Z",
+    "updatedAt": "2026-03-01T08:30:59.797Z"
+  },
+  {
+    "_id": "69a3f9436bae2f3cffe4a389",
+    "facultyId": "6981c86a847d92630bf969d4",
+    "hallId": "698eeecb1e785a2d083089f3",
+    "examDate": "2026-01-29",
+    "examSession": "FN",
+    "examTime": "09:30 AM",
+    "__v": 0,
+    "createdAt": "2026-03-01T08:30:59.797Z",
+    "updatedAt": "2026-03-01T08:30:59.797Z"
+  },
+  {
+    "_id": "69a3f9436bae2f3cffe4a38a",
+    "facultyId": "6979cb591f01aa5e56c4619e",
+    "hallId": "6990a7618de184fc55eaa3a0",
+    "examDate": "2026-01-29",
+    "examSession": "FN",
+    "examTime": "09:30 AM",
+    "__v": 0,
+    "createdAt": "2026-03-01T08:30:59.797Z",
+    "updatedAt": "2026-03-01T08:30:59.797Z"
+  }
+]

@@ -14,6 +14,7 @@ import SeatingPlanDetails from "./pages/admin/SeatingPlanDetails";
 import FacultyManagement from "./pages/admin/Faculty";
 import Settings from "./pages/admin/Settings";
 import FacultyDashboard from "./pages/faculty/Dashboard";
+import StudentLookup from "./pages/StudentLookup";
 import NotFound from "./pages/NotFound";
 import { isAuthenticated, isAdmin, isFaculty } from "./lib/auth";
 
@@ -44,6 +45,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/student" element={<StudentLookup />} />
 
           {/* Admin routes */}
           <Route path="/admin" element={
@@ -69,7 +71,7 @@ const App = () => (
           } />
 
           {/* Default routes */}
-          <Route path="/" element={<Navigate to={isAdmin() ? "/admin" : isAuthenticated() ? "/faculty" : "/login"} />} />
+          <Route path="/" element={<Navigate to={isAdmin() ? "/admin" : isAuthenticated() ? "/faculty" : "/student"} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { toast } from "@/components/ui/use-toast";
 import {
   Card,
@@ -29,13 +29,13 @@ const Login = () => {
       console.log("Calling loginUser with:", { username, password });
       const user = await loginUser(username, password);
       console.log("Login result:", user);
-      
+
       if (user) {
         toast({
           title: "Login successful",
           description: `Welcome back, ${user.name}!`,
         });
-        
+
         console.log("Redirecting user based on role:", user.role);
         // Redirect based on user role
         if (user.role === 'admin') {
@@ -94,16 +94,25 @@ const Login = () => {
             </div>
           </CardContent>
           <CardFooter>
-            <Button 
-              type="submit" 
-              className="w-full" 
+            <Button
+              type="submit"
+              className="w-full"
               disabled={isLoading}
             >
               {isLoading ? "Logging in..." : "Login"}
             </Button>
           </CardFooter>
         </form>
-        
+
+        <div className="pb-6 px-6 text-center">
+          <Link
+            to="/student"
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Looking for your exam hall? Go to Student Hall Finder
+          </Link>
+        </div>
+
         {/* Debug info - remove in production */}
         <CardFooter className="text-xs text-gray-500">
           <div className="w-full">
@@ -112,7 +121,7 @@ const Login = () => {
           </div>
         </CardFooter>
       </Card>
-    </div>
+    </div >
   );
 };
 
