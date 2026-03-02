@@ -360,7 +360,8 @@ const FacultyManagement = () => {
 
       await db.updateExamSession(selectedSessionId, { selectedFaculty: newSelectedFaculty });
     } catch (error) {
-      toast({ title: "Failed to update selection", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
+      toast({ title: "Failed to update selection", description: errorMessage, variant: "destructive" });
     }
   };
 
@@ -386,7 +387,8 @@ const FacultyManagement = () => {
 
       await db.updateExamSession(selectedSessionId, { selectedFaculty: newSelectedFaculty });
     } catch (error) {
-      toast({ title: "Failed to update all selections", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
+      toast({ title: "Failed to update all selections", description: errorMessage, variant: "destructive" });
     }
   };
 

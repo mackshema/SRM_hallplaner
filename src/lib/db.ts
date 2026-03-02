@@ -139,7 +139,10 @@ class DatabaseService {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error("Failed to update exam session");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: "Failed to update exam session" }));
+      throw new Error(err.message || err.error || "Failed to update exam session");
+    }
     return await res.json();
   }
 

@@ -316,14 +316,19 @@ const HallsManagement = () => {
     setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
 
     try {
-      await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
+      const res = await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activeHalls: newActive })
       });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Failed to update session halls" }));
+        throw new Error(errorData.message || "Failed to update session halls");
+      }
     } catch (error) {
       console.error("Error updating session halls:", error);
-      toast({ title: "Update Failed", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
+      toast({ title: "Update Failed", description: errorMessage, variant: "destructive" });
       // Revert
       setExamSessions(prev => prev.map(s => s._id === session._id ? session : s));
     }
@@ -362,14 +367,19 @@ const HallsManagement = () => {
     setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
 
     try {
-      await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
+      const res = await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activeHalls: newActive })
       });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Failed to update session halls" }));
+        throw new Error(errorData.message || "Failed to update session halls");
+      }
     } catch (error) {
       console.error("Error updating session halls:", error);
-      toast({ title: "Update Failed", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
+      toast({ title: "Update Failed", description: errorMessage, variant: "destructive" });
       setExamSessions(prev => prev.map(s => s._id === session._id ? session : s));
     }
   };

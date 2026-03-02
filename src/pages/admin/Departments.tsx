@@ -388,14 +388,19 @@ const DepartmentsManagement = () => {
     setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
 
     try {
-      await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
+      const res = await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activeDepartments: newActive })
       });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Failed to update session departments" }));
+        throw new Error(errorData.message || "Failed to update session departments");
+      }
     } catch (error) {
       console.error("Error updating session departments:", error);
-      toast({ title: "Update Failed", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
+      toast({ title: "Update Failed", description: errorMessage, variant: "destructive" });
       // Revert
       setExamSessions(prev => prev.map(s => s._id === session._id ? session : s));
     }
@@ -431,14 +436,19 @@ const DepartmentsManagement = () => {
     setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
 
     try {
-      await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
+      const res = await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activeDepartments: newActive })
       });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Failed to update session departments" }));
+        throw new Error(errorData.message || "Failed to update session departments");
+      }
     } catch (error) {
       console.error("Error updating session departments:", error);
-      toast({ title: "Update Failed", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
+      toast({ title: "Update Failed", description: errorMessage, variant: "destructive" });
       setExamSessions(prev => prev.map(s => s._id === session._id ? session : s));
     }
   };

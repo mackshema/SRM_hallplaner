@@ -689,7 +689,7 @@ export const finalizeSeatingPlan = async (req, res) => {
     const plan = new SeatingPlan(seatingPlanData);
     await plan.save();
 
-    res.json({ success: true, message: "Exam Plan Finalized Successfully" });
+    res.json(session);
   } catch (err) {
     console.error("Finalize error:", err);
     res.status(500).json({ error: "Failed to finalize plan" });
