@@ -516,23 +516,59 @@ const SeatingPlans = () => {
               </Button>
             )}
             {isFinalized && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-yellow-600 text-yellow-700 hover:bg-yellow-50"
-                onClick={async () => {
-                  try {
-                    const updated = await db.unfinalizeExamSession(selectedSessionId);
-                    setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
-                    toast({ title: "Unlocked", description: "Seating plan reverted to DRAFT mode." });
-                  } catch (err: any) {
-                    toast({ title: "Error", description: err.message, variant: "destructive" });
-                  }
-                }}
-              >
-                <Lock className="h-3 w-3 mr-2" />
-                Unlock / Edit Plan
-              </Button>
+              <div className="flex gap-2">
+                {!selectedSession.isPublished ? (
+                  <Button
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={async () => {
+                      try {
+                        const updated = await db.updateExamSession(selectedSessionId, { isPublished: true });
+                        setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                        toast({ title: "Published", description: "Exam plan published to student dashboard." });
+                      } catch (err: any) {
+                        toast({ title: "Error", description: err.message, variant: "destructive" });
+                      }
+                    }}
+                  >
+                    Publish to Student Dashboard
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-red-600 text-red-700 hover:bg-red-50"
+                    onClick={async () => {
+                      try {
+                        const updated = await db.updateExamSession(selectedSessionId, { isPublished: false });
+                        setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                        toast({ title: "Unpublished", description: "Exam plan hidden from student dashboard." });
+                      } catch (err: any) {
+                        toast({ title: "Error", description: err.message, variant: "destructive" });
+                      }
+                    }}
+                  >
+                    Unpublish
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-yellow-600 text-yellow-700 hover:bg-yellow-50"
+                  onClick={async () => {
+                    try {
+                      const updated = await db.unfinalizeExamSession(selectedSessionId);
+                      setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                      toast({ title: "Unlocked", description: "Seating plan reverted to DRAFT mode." });
+                    } catch (err: any) {
+                      toast({ title: "Error", description: err.message, variant: "destructive" });
+                    }
+                  }}
+                >
+                  <Lock className="h-3 w-3 mr-2" />
+                  Unlock / Edit Plan
+                </Button>
+              </div>
             )}
           </div>
         </div>

@@ -27,12 +27,12 @@ export const getStudentExamDetails = async (req, res) => {
             return res.status(404).json({ message: "No Exam Assignment Found. Please contact Examination Cell." });
         }
 
-        // 2. Filter only those that are FINALIZED (status = "FINAL" in our model)
-        const finalizedExams = seats.filter(seat => seat.examSessionId && seat.examSessionId.status === "FINAL");
+        // 2. Filter only those that are FINALIZED and PUBLISHED
+        const finalizedExams = seats.filter(seat => seat.examSessionId && seat.examSessionId.status === "FINAL" && seat.examSessionId.isPublished === true);
 
         if (finalizedExams.length === 0) {
             // Check if any exists but not finalized
-            return res.status(404).json({ message: "No finalized exam plan found for this roll number." });
+            return res.status(404).json({ message: "No published exam plan found for this roll number." });
         }
 
         // 3. Return minimal data as requested

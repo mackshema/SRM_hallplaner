@@ -68,6 +68,7 @@ export interface ExamSession {
   examTime: string;
   status: "DRAFT" | "FINAL";
   finalizedAt?: string;
+  isPublished?: boolean;
   activeHalls?: string[];
   activeDepartments?: string[];
   selectedFaculty?: string[];

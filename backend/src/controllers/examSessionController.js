@@ -110,7 +110,7 @@ export const unfinalizeExamSession = async (req, res) => {
 
         const session = await ExamSession.findByIdAndUpdate(
             id,
-            { status: "DRAFT" },
+            { status: "DRAFT", isPublished: false },
             { new: true }
         );
 
