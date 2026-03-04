@@ -11,6 +11,7 @@ import HallsManagement from "./pages/admin/Halls";
 import DepartmentsManagement from "./pages/admin/Departments";
 import SeatingPlans from "./pages/admin/SeatingPlans";
 import SeatingPlanDetails from "./pages/admin/SeatingPlanDetails";
+import ExamRestrictions from "./pages/admin/ExamRestrictions";
 import FacultyManagement from "./pages/admin/Faculty";
 import Settings from "./pages/admin/Settings";
 import FacultyDashboard from "./pages/faculty/Dashboard";
@@ -59,6 +60,7 @@ const App = () => (
             <Route path="departments" element={<DepartmentsManagement />} />
             <Route path="seating-plans" element={<SeatingPlans />} />
             <Route path="seating-plans/:id" element={<SeatingPlanDetails />} />
+            <Route path="exam-restrictions" element={<ExamRestrictions />} />
             <Route path="faculty" element={<FacultyManagement />} />
             <Route path="settings" element={<Settings />} />
           </Route>

@@ -289,6 +289,17 @@ export const generateSeatingPlan = async (req, res) => {
     const assignments = [];
     let deptPtr = 0;
 
+    const isPairBlocked = (dId1, dId2) => {
+      if (!session.blockedCombinations) return false;
+      for (const blockGroup of session.blockedCombinations) {
+        const strGroup = blockGroup.map(id => id.toString());
+        if (strGroup.includes(dId1.toString()) && strGroup.includes(dId2.toString())) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     const getNextActiveDepts = (n) => {
       const active = [];
       let checked = 0;
@@ -296,7 +307,16 @@ export const generateSeatingPlan = async (req, res) => {
         const dId = shuffledDeptIds[(deptPtr + checked) % shuffledDeptIds.length];
         if (deptQueues[dId] && deptQueues[dId].length > 0) {
           if (!active.includes(dId)) {
-            active.push(dId);
+            let conflicts = false;
+            for (const existingId of active) {
+              if (isPairBlocked(dId, existingId)) {
+                conflicts = true;
+                break;
+              }
+            }
+            if (!conflicts) {
+              active.push(dId);
+            }
           }
         }
         checked++;
@@ -337,6 +357,16 @@ export const generateSeatingPlan = async (req, res) => {
         let candidates = activeDepts.filter((d) => deptQueues[d].length > 0);
         if (candidates.length === 0) {
           candidates = shuffledDeptIds.filter((d) => deptQueues[d].length > 0);
+
+          const currentHBatchIds = Array.from(hallBatch.keys());
+          candidates = candidates.filter(d => {
+            if (currentHBatchIds.includes(d)) return true; // Already in batch
+            for (const existingId of currentHBatchIds) {
+              if (isPairBlocked(d, existingId)) return false;
+            }
+            return true;
+          });
+
           if (candidates.length === 0) break;
           candidates.forEach((c) => {
             if (!hallBatch.has(c)) hallBatch.set(c, []);

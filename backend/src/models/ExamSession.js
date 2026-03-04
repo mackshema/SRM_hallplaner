@@ -12,6 +12,7 @@ const examSessionSchema = new mongoose.Schema(
         activeHalls: [{ type: mongoose.Schema.Types.ObjectId, ref: "Hall" }],
         activeDepartments: [{ type: mongoose.Schema.Types.ObjectId, ref: "Department" }],
         selectedFaculty: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+        blockedCombinations: [[{ type: mongoose.Schema.Types.ObjectId, ref: "Department" }]], // Array of department ID pairs/groups
     },
     { timestamps: true }
 );

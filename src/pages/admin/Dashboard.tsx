@@ -20,7 +20,8 @@ import {
   LayoutGrid,
   Users,
   Settings as SettingsIcon,
-  LogOut
+  LogOut,
+  ShieldAlert
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -28,7 +29,7 @@ const AdminDashboard = () => {
 
   const handleLogout = () => {
     logout();
-    navigate ("/login");
+    navigate("/login");
   };
 
   return (
@@ -70,6 +71,14 @@ const AdminDashboard = () => {
                   <Link to="/admin/seating-plans">
                     <LayoutGrid className="h-4 w-4" />
                     <span>Seating Plans</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to="/admin/exam-restrictions">
+                    <ShieldAlert className="h-4 w-4" />
+                    <span>Exam Restrictions</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

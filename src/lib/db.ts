@@ -72,6 +72,7 @@ export interface ExamSession {
   activeHalls?: string[];
   activeDepartments?: string[];
   selectedFaculty?: string[];
+  blockedCombinations?: string[][];
 }
 
 class DatabaseService {
