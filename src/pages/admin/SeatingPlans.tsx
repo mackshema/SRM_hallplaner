@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -31,7 +32,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Shuffle, FileDown, Plus, Lock, Calendar, Clock } from "lucide-react";
+import { Shuffle, FileDown, Plus, Lock, Calendar, Clock, Edit, Trash2 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { HeaderSettings } from "@/lib/exportBenchLayoutWord";
@@ -61,6 +62,17 @@ const SeatingPlans = () => {
     examTime: "09:30 AM"
   });
   const [creatingSession, setCreatingSession] = useState(false);
+
+  const [showEditSessionDialog, setShowEditSessionDialog] = useState(false);
+  const [showDeleteSessionDialog, setShowDeleteSessionDialog] = useState(false);
+  const [editingSession, setEditingSession] = useState(false);
+  const [deletingSession, setDeletingSession] = useState(false);
+  const [editSessionData, setEditSessionData] = useState({
+    id: "",
+    examDate: "",
+    examSession: "FN" as "FN" | "AN",
+    examTime: ""
+  });
 
   const [unallocatedStudents, setUnallocatedStudents] = useState<string[]>([]);
   const [showUnallocatedDialog, setShowUnallocatedDialog] = useState(false);
@@ -123,6 +135,44 @@ const SeatingPlans = () => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
       setCreatingSession(false);
+    }
+  };
+
+  const handleEditSession = async () => {
+    if (!editSessionData.examDate || !editSessionData.examTime) {
+      toast({ title: "Error", description: "Please fill all fields", variant: "destructive" });
+      return;
+    }
+    setEditingSession(true);
+    try {
+      const updated = await db.updateExamSession(editSessionData.id, {
+        examDate: editSessionData.examDate,
+        examSession: editSessionData.examSession,
+        examTime: editSessionData.examTime,
+      });
+      setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+      setShowEditSessionDialog(false);
+      toast({ title: "Success", description: "Exam session updated successfully" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setEditingSession(false);
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    if (!selectedSessionId) return;
+    setDeletingSession(true);
+    try {
+      await db.deleteExamSession(selectedSessionId);
+      setExamSessions(prev => prev.filter(s => s._id !== selectedSessionId));
+      setSelectedSessionId("");
+      setShowDeleteSessionDialog(false);
+      toast({ title: "Success", description: "Exam session deleted successfully" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setDeletingSession(false);
     }
   };
 
@@ -442,18 +492,52 @@ const SeatingPlans = () => {
         <div className="flex gap-2">
 
           {/* Session Selector */}
-          <select
-            className="border p-2 rounded-md bg-white min-w-[200px]"
-            value={selectedSessionId}
-            onChange={(e) => setSelectedSessionId(e.target.value)}
-          >
-            <option value="" disabled>Select Exam Session</option>
-            {examSessions.map(s => (
-              <option key={s._id} value={s._id}>
-                {s.examDate} ({s.examSession}) - {s.status}
-              </option>
-            ))}
-          </select>
+          <div className="flex gap-1 items-center bg-white border rounded-md p-1 shadow-sm">
+            <select
+              className="p-1 min-w-[200px] outline-none bg-transparent"
+              value={selectedSessionId}
+              onChange={(e) => setSelectedSessionId(e.target.value)}
+            >
+              <option value="" disabled>Select Exam Session</option>
+              {examSessions.map(s => (
+                <option key={s._id} value={s._id}>
+                  {s.examDate} ({s.examSession}) - {s.status}
+                </option>
+              ))}
+            </select>
+            {selectedSessionId && selectedSession?.status === "DRAFT" && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                  onClick={() => {
+                    if (selectedSession) {
+                      setEditSessionData({
+                        id: selectedSession._id,
+                        examDate: selectedSession.examDate,
+                        examSession: selectedSession.examSession,
+                        examTime: selectedSession.examTime,
+                      });
+                      setShowEditSessionDialog(true);
+                    }
+                  }}
+                  title="Edit Exam Session"
+                >
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                  onClick={() => setShowDeleteSessionDialog(true)}
+                  title="Delete Exam Session"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </div>
 
           <Button onClick={() => setShowCreateSessionDialog(true)} variant="secondary">
             <Plus className="h-4 w-4 mr-1" /> New Exam Date
@@ -774,6 +858,61 @@ const SeatingPlans = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Session Dialog */}
+      <Dialog open={showEditSessionDialog} onOpenChange={setShowEditSessionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Exam Session</DialogTitle>
+            <DialogDescription>Modify the details of this exam session.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Exam Date</Label>
+              <Input type="date" value={editSessionData.examDate} onChange={e => setEditSessionData({ ...editSessionData, examDate: e.target.value })} />
+            </div>
+            <div className="grid gap-2">
+              <Label>Session</Label>
+              <select className="border p-2 rounded" value={editSessionData.examSession} onChange={e => setEditSessionData({ ...editSessionData, examSession: e.target.value as any })}>
+                <option value="FN">Forenoon (FN)</option>
+                <option value="AN">Afternoon (AN)</option>
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Time</Label>
+              <Input value={editSessionData.examTime} onChange={e => setEditSessionData({ ...editSessionData, examTime: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditSessionDialog(false)}>Cancel</Button>
+            <Button onClick={handleEditSession} disabled={editingSession}>
+              {editingSession ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Session Alert Dialog */}
+      <AlertDialog open={showDeleteSessionDialog} onOpenChange={setShowDeleteSessionDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the exam session and all its associated seating plans.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowDeleteSessionDialog(false)}>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteSession}
+              disabled={deletingSession}
+            >
+              {deletingSession ? "Deleting..." : "Delete"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
