@@ -46,6 +46,9 @@ const FacultyManagement = () => {
   const [formData, setFormData] = useState({
     name: "",
     department: "",
+    designation: "",
+    facultyEmail: "",
+    hodEmail: "",
   });
 
   const [settings, setSettings] = useState({
@@ -140,10 +143,10 @@ const FacultyManagement = () => {
 
   const handleAddFaculty = async () => {
     try {
-      if (!formData.name || !formData.department) {
+      if (!formData.name || !formData.department || !formData.designation || !formData.facultyEmail || !formData.hodEmail) {
         toast({
           title: "Validation Error",
-          description: "Please fill all the fields.",
+          description: "Please fill all the required fields including Email and Designation.",
           variant: "destructive",
         });
         return;
@@ -160,6 +163,9 @@ const FacultyManagement = () => {
         password: password,
         role: 'faculty',
         department: formData.department,
+        designation: formData.designation,
+        facultyEmail: formData.facultyEmail,
+        hodEmail: formData.hodEmail,
       });
 
       setFaculty([...faculty, newFaculty]);
@@ -169,13 +175,13 @@ const FacultyManagement = () => {
         description: `${newFaculty.name} has been added successfully.\nUsername: ${username}\nPassword: ${password}`,
       });
 
-      setFormData({ name: "", department: "" });
+      setFormData({ name: "", department: "", designation: "", facultyEmail: "", hodEmail: "" });
       setIsAddOpen(false);
     } catch (error) {
       console.error("Error adding faculty:", error);
       toast({
         title: "Failed to add faculty",
-        description: "An error occurred while adding the faculty member.",
+        description: error instanceof Error ? error.message : "An error occurred while adding the faculty member.",
         variant: "destructive",
       });
     }
@@ -188,6 +194,9 @@ const FacultyManagement = () => {
     setFormData({
       name: member.name,
       department: member.department || "",
+      designation: member.designation || "",
+      facultyEmail: member.facultyEmail || "",
+      hodEmail: member.hodEmail || "",
     });
     setIsEditOpen(true);
   };
@@ -201,7 +210,10 @@ const FacultyManagement = () => {
 
       const updatedUser = await db.updateFaculty(id, {
         name: formData.name,
-        department: formData.department
+        department: formData.department,
+        designation: formData.designation,
+        facultyEmail: formData.facultyEmail,
+        hodEmail: formData.hodEmail,
       });
 
       setFaculty(faculty.map(f => (f.id === id || f._id === id) ? { ...f, ...updatedUser } : f));
@@ -439,7 +451,7 @@ const FacultyManagement = () => {
 
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
-              <Button onClick={() => setFormData({ name: "", department: "" })}>Add Faculty</Button>
+              <Button onClick={() => setFormData({ name: "", department: "", designation: "", facultyEmail: "", hodEmail: "" })}>Add Faculty</Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -450,11 +462,11 @@ const FacultyManagement = () => {
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="name">Faculty Name</Label>
+                  <Label htmlFor="name">Faculty Name (Format: Initial. Name)</Label>
                   <Input
                     id="name"
                     name="name"
-                    placeholder="e.g., John Doe"
+                    placeholder="e.g., R. Krishna"
                     value={formData.name}
                     onChange={handleInputChange}
                   />
@@ -466,6 +478,44 @@ const FacultyManagement = () => {
                     name="department"
                     placeholder="e.g., Computer Science"
                     value={formData.department}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="designation">Designation</Label>
+                  <select
+                    id="designation"
+                    name="designation"
+                    className="border p-2 rounded-md bg-white text-sm"
+                    value={formData.designation}
+                    onChange={(e: any) => handleInputChange(e)}
+                  >
+                    <option value="" disabled>Select Designation</option>
+                    <option value="Assistant Professor">Assistant Professor</option>
+                    <option value="Associate Professor">Associate Professor</option>
+                    <option value="Professor">Professor</option>
+                    <option value="HOD">HOD</option>
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="facultyEmail">Faculty Email ID</Label>
+                  <Input
+                    id="facultyEmail"
+                    name="facultyEmail"
+                    type="email"
+                    placeholder="faculty@srm.edu"
+                    value={formData.facultyEmail}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="hodEmail">HOD Email ID</Label>
+                  <Input
+                    id="hodEmail"
+                    name="hodEmail"
+                    type="email"
+                    placeholder="hod@srm.edu"
+                    value={formData.hodEmail}
                     onChange={handleInputChange}
                   />
                 </div>
@@ -494,10 +544,11 @@ const FacultyManagement = () => {
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="edit-name">Faculty Name</Label>
+                  <Label htmlFor="edit-name">Faculty Name (Format: Initial. Name)</Label>
                   <Input
                     id="edit-name"
                     name="name"
+                    placeholder="e.g., R. Krishna"
                     value={formData.name}
                     onChange={handleInputChange}
                   />
@@ -508,6 +559,42 @@ const FacultyManagement = () => {
                     id="edit-department"
                     name="department"
                     value={formData.department}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-designation">Designation</Label>
+                  <select
+                    id="edit-designation"
+                    name="designation"
+                    className="border p-2 rounded-md bg-white text-sm"
+                    value={formData.designation}
+                    onChange={(e: any) => handleInputChange(e)}
+                  >
+                    <option value="" disabled>Select Designation</option>
+                    <option value="Assistant Professor">Assistant Professor</option>
+                    <option value="Associate Professor">Associate Professor</option>
+                    <option value="Professor">Professor</option>
+                    <option value="HOD">HOD</option>
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-facultyEmail">Faculty Email ID</Label>
+                  <Input
+                    id="edit-facultyEmail"
+                    name="facultyEmail"
+                    type="email"
+                    value={formData.facultyEmail}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-hodEmail">HOD Email ID</Label>
+                  <Input
+                    id="edit-hodEmail"
+                    name="hodEmail"
+                    type="email"
+                    value={formData.hodEmail}
                     onChange={handleInputChange}
                   />
                 </div>
@@ -535,6 +622,18 @@ const FacultyManagement = () => {
                     <div>
                       <Label className="text-muted-foreground">Department</Label>
                       <p className="font-medium">{selectedFaculty.department || "N/A"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Designation</Label>
+                      <p className="font-medium">{selectedFaculty.designation || "N/A"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Faculty Email</Label>
+                      <p className="font-medium">{selectedFaculty.facultyEmail || "N/A"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">HOD Email</Label>
+                      <p className="font-medium">{selectedFaculty.hodEmail || "N/A"}</p>
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Username</Label>
@@ -596,6 +695,7 @@ const FacultyManagement = () => {
                 />
               </TableHead>
               <TableHead>Name</TableHead>
+              <TableHead>Designation</TableHead>
               <TableHead>Department</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Assigned Halls</TableHead>
@@ -622,6 +722,7 @@ const FacultyManagement = () => {
                     />
                   </TableCell>
                   <TableCell className="font-medium">{member.name}</TableCell>
+                  <TableCell>{member.designation || "N/A"}</TableCell>
                   <TableCell>{member.department || "N/A"}</TableCell>
                   <TableCell>{member.username}</TableCell>
                   <TableCell>

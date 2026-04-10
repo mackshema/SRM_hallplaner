@@ -1,6 +1,19 @@
 import SeatAssignment from "../models/SeatAssignment.js";
 import ExamSession from "../models/ExamSession.js";
 import Hall from "../models/Hall.js";
+import User from "../models/User.js";
+import bcrypt from "bcryptjs";
+import nodemailer from "nodemailer";
+
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+    port: process.env.EMAIL_PORT || 465,
+    secure: process.env.EMAIL_PORT === '465',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
 
 /**
  * GET /api/student/:rollNumber
@@ -14,11 +27,6 @@ export const getStudentExamDetails = async (req, res) => {
             return res.status(400).json({ message: "Roll number is required" });
         }
 
-        // 1. Find the seat assignment for this roll number
-        // We might have multiple assignments for different dates, 
-        // but usually we want the current one. 
-        // For now, let's find the most recent one or all.
-        // The user request implies a single lookup.
         const seats = await SeatAssignment.find({ studentRollNumber: rollNumber })
             .populate('examSessionId')
             .populate('hallId');
@@ -27,32 +35,268 @@ export const getStudentExamDetails = async (req, res) => {
             return res.status(404).json({ message: "No Exam Assignment Found. Please contact Examination Cell." });
         }
 
-        // 2. Filter only those that are FINALIZED and PUBLISHED
         const finalizedExams = seats.filter(seat => seat.examSessionId && seat.examSessionId.status === "FINAL" && seat.examSessionId.isPublished === true);
 
         if (finalizedExams.length === 0) {
-            // Check if any exists but not finalized
             return res.status(404).json({ message: "No published exam plan found for this roll number." });
         }
 
-        // 3. Return minimal data as requested
-        // Returning multiple if there are multiple dates finalized
-        const results = finalizedExams.map(seat => ({
-            hall: seat.hallId ? seat.hallId.name : "N/A",
-            floor: seat.hallId ? seat.hallId.floor : "N/A",
-            date: seat.examSessionId.examDate,
-            session: seat.examSessionId.examSession,
-            time: seat.examSessionId.examTime,
-            rollNumber: seat.studentRollNumber
-        }));
+        const results = finalizedExams.map(seat => {
+            const rowLabel = seat.isExtraBench ? "Extra Bench" : `Row ${seat.row}`;
+            return {
+                hall: seat.hallId ? seat.hallId.name : "N/A",
+                floor: seat.hallId ? seat.hallId.floor : "N/A",
+                date: seat.examSessionId.examDate,
+                session: seat.examSessionId.examSession,
+                time: seat.examSessionId.examTime,
+                rollNumber: seat.studentRollNumber,
+                seatPosition: `${rowLabel} - Column ${seat.column} - Seat ${seat.benchPosition}`
+            };
+        });
 
-        // If there's only one, return it as a single object or array depending on UI needs.
-        // The user suggested returning a single object in their logic.
-        // Let's return the array to be safe if they have multiple exams.
         res.json(results);
 
     } catch (err) {
         console.error("Error in getStudentExamDetails:", err);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+/**
+ * POST /api/student/create-account
+ * Admin creating a student account.
+ */
+export const createStudentAccount = async (req, res) => {
+    try {
+        const { name, rollNumber, email, password, degree, department } = req.body;
+
+        if (!name || !rollNumber || !password) {
+            return res.status(400).json({ message: "Name, roll number, and password are required" });
+        }
+
+        // Check if student already exists
+        const existingStudent = await User.findOne({ username: rollNumber });
+        if (existingStudent) {
+            return res.status(400).json({ message: "Student account already exists for this roll number." });
+        }
+
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        const student = await User.create({
+            name,
+            username: rollNumber,
+            password: hashedPassword,
+            email: email || "",
+            role: "student",
+            degree,
+            department
+        });
+
+        // Send Email with Credentials
+        if (email && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            try {
+                const mailOptions = {
+                    from: `"Exam Cell" <${process.env.EMAIL_USER}>`,
+                    to: email,
+                    subject: 'Your Exam Hall Planner Account Details',
+                    text: `Hello ${name},\n\nYour exam portal account has been created!\n\nUsername: ${rollNumber}\nPassword: ${password}\n\nThis is your auto-generated unique password. Once you log in, you can create or change your own password in the settings.\nRecommendation: If you put your date of birth as your password, it would be fine enough to remember.\n\nPlease login to check your seating plan.\n\nThanks,\nExamination Cell\nSRM MCET`
+                };
+                await transporter.sendMail(mailOptions);
+                console.log(`Email sent successfully to ${email}`);
+            } catch (mailError) {
+                console.error("Failed to send email:", mailError);
+            }
+        }
+
+        res.status(201).json({
+            message: "Student account created successfully! Credentials have been sent via email if provided.",
+            student: { name: student.name, username: student.username, email: student.email }
+        });
+    } catch (err) {
+        console.error("Error creating student:", err);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+/**
+ * POST /api/student/change-password
+ * Change password for a logged-in student.
+ */
+export const changeStudentPassword = async (req, res) => {
+    try {
+        const { username, currentPassword, newPassword } = req.body;
+
+        if (!username || !currentPassword || !newPassword) {
+            return res.status(400).json({ message: "All fields are required" });
+        }
+
+        const student = await User.findOne({ username, role: "student" });
+        if (!student) {
+            return res.status(404).json({ message: "Student account not found." });
+        }
+
+        // Verify current password
+        const isMatch = await bcrypt.compare(currentPassword, student.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Incorrect current password." });
+        }
+
+        // Hash and update new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        student.password = hashedPassword;
+        await student.save();
+
+        res.json({ message: "Password updated successfully." });
+    } catch (err) {
+        console.error("Error changing password:", err);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+/**
+ * GET /api/student
+ * Get all students.
+ */
+export const getAllStudents = async (req, res) => {
+    try {
+        const students = await User.find({ role: "student" }).select('-password');
+        res.json(students);
+    } catch (err) {
+        console.error("Error fetching students:", err);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+/**
+ * PUT /api/student/:id
+ * Update a student account.
+ */
+export const updateStudentAccount = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, rollNumber, email, skipEmail, degree, department } = req.body;
+
+        const student = await User.findById(id);
+        if (!student || student.role !== "student") {
+            return res.status(404).json({ message: "Student not found" });
+        }
+
+        student.name = name || student.name;
+        student.username = rollNumber || student.username;
+        student.email = email !== undefined ? email : student.email;
+        if (degree !== undefined) student.degree = degree;
+        if (department !== undefined) student.department = department;
+
+        await student.save();
+
+        if (email && !skipEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            try {
+                const mailOptions = {
+                    from: `"Exam Cell" <${process.env.EMAIL_USER}>`,
+                    to: email,
+                    subject: 'Your Exam Hall Planner Account Update',
+                    text: `Hello ${student.name},\n\nYour exam portal account details have been updated!\n\nUsername: ${student.username}\n\nPlease login to check your seating plan.\n\nThanks,\nExamination Cell\nSRM MCET`
+                };
+                await transporter.sendMail(mailOptions);
+            } catch (mailError) {
+                console.error("Failed to send update email:", mailError);
+            }
+        }
+
+        res.json({ message: "Student updated successfully", student });
+    } catch (err) {
+        console.error("Error updating student:", err);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+/**
+ * POST /api/student/bulk-create
+ * Bulk create students from array.
+ */
+export const bulkCreateStudents = async (req, res) => {
+    try {
+        const { students } = req.body; // array of {name, rollNumber, email, password}
+        if (!Array.isArray(students) || students.length === 0) {
+            return res.status(400).json({ message: "Valid array of students is required" });
+        }
+
+        const createdStudents = [];
+        const skippedStudents = [];
+        
+        const salt = await bcrypt.genSalt(10);
+
+        for (const input of students) {
+            try {
+                const existing = await User.findOne({ username: input.rollNumber });
+                if (existing) {
+                    skippedStudents.push({ ...input, reason: "Roll number already exists" });
+                    continue;
+                }
+                
+                const hashedPassword = await bcrypt.hash(input.password, salt);
+                
+                const student = await User.create({
+                    name: input.name,
+                    username: input.rollNumber,
+                    password: hashedPassword,
+                    email: input.email || "",
+                    role: "student",
+                    degree: input.degree,
+                    department: input.department
+                });
+
+                createdStudents.push(student);
+
+                if (input.email && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+                    try {
+                        const mailOptions = {
+                            from: `"Exam Cell" <${process.env.EMAIL_USER}>`,
+                            to: input.email,
+                            subject: 'Your Exam Hall Planner Account Details',
+                            text: `Hello ${input.name},\n\nYour exam portal account has been created!\n\nUsername: ${input.rollNumber}\nPassword: ${input.password}\n\nThis is your auto-generated unique password. Once you log in, you can create or change your own password in the settings.\nRecommendation: If you put your date of birth as your password, it would be fine enough to remember.\n\nPlease login to check your seating plan.\n\nThanks,\nExamination Cell\nSRM MCET`
+                        };
+                        await transporter.sendMail(mailOptions);
+                    } catch (mailError) {
+                        console.error("Failed to send bulk email to ${input.email}:", mailError);
+                    }
+                }
+            } catch (err) {
+                skippedStudents.push({ ...input, reason: err.message });
+            }
+        }
+
+        res.status(201).json({
+            message: `Successfully created ${createdStudents.length} students. Skipped ${skippedStudents.length}.`,
+            createdCount: createdStudents.length,
+            skippedCount: skippedStudents.length,
+            skippedDetailed: skippedStudents
+        });
+
+    } catch (err) {
+        console.error("Error in bulk create:", err);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+/**
+ * DELETE /api/student/:id
+ * Delete a student account.
+ */
+export const deleteStudentAccount = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const student = await User.findByIdAndDelete(id);
+        if (!student) {
+            return res.status(404).json({ message: "Student not found" });
+        }
+        res.json({ message: "Student deleted successfully" });
+    } catch (err) {
+        console.error("Error deleting student:", err);
         res.status(500).json({ message: "Internal server error" });
     }
 };

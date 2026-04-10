@@ -60,7 +60,7 @@ const HallsManagement = () => {
     columns: 5,
     seatsPerBench: 3,
     facultyRequired: 1, // Default to 1
-    floor: ""
+    floor: "Ground Floor"
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [examSessions, setExamSessions] = useState<ExamSession[]>([]);
@@ -133,7 +133,7 @@ const HallsManagement = () => {
       columns: 5,
       seatsPerBench: 3,
       facultyRequired: 1,
-      floor: "",
+      floor: "Ground Floor",
     });
     setSelectedHall(null);
   };
@@ -146,7 +146,7 @@ const HallsManagement = () => {
       columns: hall.columns,
       seatsPerBench: hall.seatsPerBench,
       facultyRequired: hall.facultyRequired || 1, // Load existing requirement or default
-      floor: hall.floor || "",
+      floor: hall.floor || "Ground Floor",
     });
     setOpen(true);
   };

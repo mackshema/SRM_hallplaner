@@ -233,6 +233,28 @@ export const generateSeatingPlan = async (req, res) => {
       return res.status(400).json({ message: "No departments found. Please create departments first." });
     }
 
+    // FIX 4: Skip Roll Number Validation
+    const invalidSkips = [];
+    for (const skip of skipRollNumbers) {
+      const skipStr = String(skip).trim();
+      if (!skipStr) continue;
+      const skipNum = Number(skipStr);
+      let isValid = false;
+      for (const dept of departments) {
+        if (skipNum >= Number(dept.rollNumberStart) && skipNum <= Number(dept.rollNumberEnd)) {
+          isValid = true;
+          break;
+        }
+      }
+      if (!isValid) invalidSkips.push(skipStr);
+    }
+
+    if (invalidSkips.length > 0) {
+      return res.status(400).json({
+        message: "Invalid roll number. This roll number does not exist in the seating plan."
+      });
+    }
+
     // ============================================
     // STEP 1: STUDENT SEATING LOGIC
     // ============================================

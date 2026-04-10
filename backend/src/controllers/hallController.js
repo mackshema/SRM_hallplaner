@@ -22,6 +22,14 @@ export const createHall = async (req, res) => {
       });
     }
 
+    // Explicit check for duplicate hall name BEFORE saving (FIX 1)
+    const hallExists = await Hall.findOne({ name });
+    if (hallExists) {
+      return res.status(400).json({
+        message: "Hall number already exists. Please use a unique hall number."
+      });
+    }
+
     // Validate numeric fields
     if (typeof rows !== 'number' || rows < 1 ||
       typeof columns !== 'number' || columns < 1 ||

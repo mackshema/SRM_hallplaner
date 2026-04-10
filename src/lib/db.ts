@@ -10,6 +10,9 @@ export interface User {
   password?: string;
   role: 'admin' | 'faculty';
   department?: string;
+  designation?: string;
+  facultyEmail?: string;
+  hodEmail?: string;
   isSelected?: boolean;
   isSelectedForGeneration?: boolean;
 }
@@ -204,7 +207,10 @@ class DatabaseService {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...faculty, role: 'faculty' })
     });
-    if (!res.ok) throw new Error("Failed to add faculty");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: "Failed to add faculty" }));
+      throw new Error(err.message || "Failed to add faculty");
+    }
     return await res.json();
   }
 
@@ -383,7 +389,7 @@ class DatabaseService {
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ message: "Failed to generate seating plans" }));
         console.error("Generate seating plans error:", errorData);
-        return { success: false, unallocated: [] };
+        throw new Error(errorData.message || "Failed to generate seating plans");
       }
 
       const data = await res.json();
@@ -394,7 +400,7 @@ class DatabaseService {
       };
     } catch (error) {
       console.error("Error generating plans:", error);
-      return { success: false, unallocated: [] };
+      throw error;
     }
   }
 

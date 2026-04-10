@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { toast } from "@/components/ui/use-toast";
 import {
   Card,
@@ -37,11 +37,12 @@ const Login = () => {
         });
 
         console.log("Redirecting user based on role:", user.role);
-        // Redirect based on user role
         if (user.role === 'admin') {
           navigate('/admin');
         } else if (user.role === 'faculty') {
           navigate('/faculty');
+        } else if (user.role === 'student') {
+          navigate('/student');
         }
       } else {
         throw new Error("Invalid credentials");
@@ -105,12 +106,9 @@ const Login = () => {
         </form>
 
         <div className="pb-6 px-6 text-center">
-          <Link
-            to="/student"
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            Looking for your exam hall? Go to Student Hall Finder
-          </Link>
+          <p className="text-sm font-medium text-slate-500">
+            Students can log in with their Roll Number here.
+          </p>
         </div>
 
         {/* Debug info - remove in production */}
@@ -118,6 +116,7 @@ const Login = () => {
           <div className="w-full">
             <p>Admin: SRM@Admin / Admin@12345678</p>
             <p>Faculty: faculty@1234 / srm@123456789</p>
+            <p>Student: 911123149001 / student123</p>
           </div>
         </CardFooter>
       </Card>

@@ -103,7 +103,7 @@
     "_id": "69902b44c4931747512dfdc3",
     "name": "dhanuja1",
     "username": "dhanuja1@1234",
-    "password": "dhanuja1@srm1234",
+    "password": "1@srm1234",
     "role": "faculty",
     "department": "cyber",
     "isSelected": true,
@@ -117,7 +117,7 @@
   {
     "_id": "69902eb1c4931747512dfdd4",
     "name": "dhanuja2",
-    "username": "dhanuja2@1234",
+    "username": "2@1234",
     "password": "dhanuja2@srm1234",
     "role": "faculty",
     "department": "cyber",

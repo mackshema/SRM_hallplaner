@@ -6,7 +6,7 @@ export interface User {
   _id?: string;
   name: string;
   username: string;
-  role: 'admin' | 'faculty';
+  role: 'admin' | 'faculty' | 'student';
 }
 
 // Store the current user in memory
@@ -14,9 +14,7 @@ let currentUser: User | null = null;
 
 export async function loginUser(username: string, password: string): Promise<User | null> {
   try {
-    // In a real application, this would be a database query with password hashing
-    // For this demo, we'll simulate a database lookup
-    const user = await db.getUserByCredentials(username, password);
+    const user = await import('./db').then(m => m.db.getUserByCredentials(username, password));
 
     if (user) {
       // Store the user in memory/session
@@ -62,4 +60,9 @@ export function isAdmin(): boolean {
 export function isFaculty(): boolean {
   const user = getCurrentUser();
   return user !== null && user.role === 'faculty';
+}
+
+export function isStudent(): boolean {
+  const user = getCurrentUser();
+  return user !== null && user.role === 'student';
 }

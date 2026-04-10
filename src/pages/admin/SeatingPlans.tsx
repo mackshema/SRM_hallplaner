@@ -281,9 +281,10 @@ const SeatingPlans = () => {
       }
     } catch (error) {
       console.error(error);
+      const errorMessage = error instanceof Error ? error.message : "Error while generating seating plans.";
       toast({
         title: "Error",
-        description: "Error while generating seating plans.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -486,7 +487,7 @@ const SeatingPlans = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold">Seating Plans</h1>
+          <h1 className="text-3xl font-bold">Internal Examination Seating</h1>
           <p className="text-gray-600">View and manage seating plans for all exam halls</p>
         </div>
         <div className="flex gap-2">

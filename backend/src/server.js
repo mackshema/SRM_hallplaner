@@ -13,7 +13,8 @@ import settingsRoutes from "./routes/settingsRoutes.js";
 import examSessionRoutes from "./routes/examSessionRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import exportRoutes from "./routes/exportRoutes.js";
-
+import delegationRoutes from "./routes/delegationRoutes.js";
+import annaUniversityRoutes from "./routes/annaUniversityRoutes.js";
 
 dotenv.config();
 connectDB();
@@ -35,6 +36,8 @@ app.use("/api/settings", settingsRoutes); // Global Settings
 app.use("/api/exam-sessions", examSessionRoutes); // Exam Sessions
 app.use("/api/student", studentRoutes); // Public Student Lookup
 app.use("/api/export", exportRoutes); // Zipped Document exports
+app.use("/api/delegation", delegationRoutes); // Delegation requests
+app.use("/api/anna", annaUniversityRoutes); // Anna University Module
 
 
 //  TEST ROUTE

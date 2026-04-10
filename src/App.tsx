@@ -13,26 +13,31 @@ import SeatingPlans from "./pages/admin/SeatingPlans";
 import SeatingPlanDetails from "./pages/admin/SeatingPlanDetails";
 import ExamRestrictions from "./pages/admin/ExamRestrictions";
 import FacultyManagement from "./pages/admin/Faculty";
+import StudentsManagement from "./pages/admin/Students";
 import Settings from "./pages/admin/Settings";
+import AnnaUniversityPlanner from "./pages/admin/AnnaUniversityPlanner";
 import FacultyDashboard from "./pages/faculty/Dashboard";
 import StudentLookup from "./pages/StudentLookup";
 import NotFound from "./pages/NotFound";
-import { isAuthenticated, isAdmin, isFaculty } from "./lib/auth";
+import { isAuthenticated, isAdmin, isFaculty, isStudent } from "./lib/auth";
 
 const queryClient = new QueryClient();
 
-// Protected route component
-const ProtectedRoute = ({ children, requiredRole }: { children: JSX.Element, requiredRole?: 'admin' | 'faculty' }) => {
+const ProtectedRoute = ({ children, requiredRole }: { children: JSX.Element, requiredRole?: 'admin' | 'faculty' | 'student' }) => {
   if (!isAuthenticated()) {
     return <Navigate to="/login" replace />;
   }
 
   if (requiredRole === 'admin' && !isAdmin()) {
-    return <Navigate to="/faculty" replace />;
+    return <Navigate to={isStudent() ? "/student" : "/faculty"} replace />;
   }
 
   if (requiredRole === 'faculty' && !isFaculty()) {
-    return <Navigate to="/admin" replace />;
+    return <Navigate to={isAdmin() ? "/admin" : "/student"} replace />;
+  }
+
+  if (requiredRole === 'student' && !isStudent()) {
+    return <Navigate to={isAdmin() ? "/admin" : "/faculty"} replace />;
   }
 
   return children;
@@ -60,8 +65,10 @@ const App = () => (
             <Route path="departments" element={<DepartmentsManagement />} />
             <Route path="seating-plans" element={<SeatingPlans />} />
             <Route path="seating-plans/:id" element={<SeatingPlanDetails />} />
+            <Route path="anna-university" element={<AnnaUniversityPlanner />} />
             <Route path="exam-restrictions" element={<ExamRestrictions />} />
             <Route path="faculty" element={<FacultyManagement />} />
+            <Route path="students" element={<StudentsManagement />} />
             <Route path="settings" element={<Settings />} />
           </Route>
 

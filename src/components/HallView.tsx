@@ -132,9 +132,9 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         setHall(hallData);
 
         // Load exam metadata from hall if available
-        if (hallData.examDate) setExamDate(hallData.examDate);
-        if (hallData.examSession) setExamSession(hallData.examSession);
-        if (hallData.examTime) setExamTime(hallData.examTime);
+        setExamDate(hallData.examDate || "");
+        setExamSession(hallData.examSession || "FN");
+        setExamTime(hallData.examTime || "");
 
         const departmentsData = await db.getAllDepartments();
         setDepartments(departmentsData);
@@ -181,9 +181,9 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         setSeatAssignments(assignments);
 
         // Load exam metadata from session response if available
-        if (data.examDate) setExamDate(data.examDate);
-        if (data.examSession) setExamSession(data.examSession);
-        if (data.examTime) setExamTime(data.examTime);
+        setExamDate(data.examDate || "");
+        setExamSession(data.examSession || "FN");
+        setExamTime(data.examTime || "");
 
         // Set Faculty Assignments
         setFacultyAssigned(data.facultyAssigned || []);
@@ -363,11 +363,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
     let finalSession = hall?.examSession || "";
     let finalTime = hall?.examTime || "";
 
-    // If context has a non-default date (user selected), use it.
-    if (examDate && !contextDateIsDefault) finalDate = examDate;
-    if (examSession && examSession !== "FN") finalSession = examSession;
-    if (examTime && examTime !== "09:30 AM") finalTime = examTime;
-
+    // Return whatever is there, preserving empty state instead of hiding it behind defaults
     return {
       date: finalDate,
       session: finalSession,
@@ -551,7 +547,8 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       doc.text(`Hall No: ${hall.name}`, 14, 68);
-      doc.text(`Date: ${examDate} (${examSession}) ${examTime}`, pageWidth - 14, 68, { align: "right" });
+      const displayDate = examDate ? `${examDate} (${examSession}) ${examTime}` : "No Session Assigned";
+      doc.text(`Date: ${displayDate}`, pageWidth - 14, 68, { align: "right" });
 
       // Group seats by department for summary table
       const deptGroups: { [deptId: string]: string[] } = {};

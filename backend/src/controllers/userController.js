@@ -15,14 +15,28 @@ export const getUsers = async (req, res) => {
 // @desc    Create a new user (Faculty)
 // @route   POST /api/users
 export const createUser = async (req, res) => {
-    const { name, username, password, role, department } = req.body;
+    const { name, username, password, role, department, designation, facultyEmail, hodEmail } = req.body;
 
     try {
-        const userExists = await User.findOne({ username });
+        // FIX 3: Faculty Name Format Validation
+        // Initial is mandatory • Must contain at least one character before "." • Followed by full name
+        if (role === 'faculty' || !role) {
+            const nameRegex = /^.+\.\s*.+$/;
+            if (!nameRegex.test(name)) {
+                return res.status(400).json({ message: "Faculty name must include initial and full name (Example: R. Kumar)." });
+            }
+        }
 
-        if (userExists) {
-            res.status(400).json({ message: "User already exists" });
-            return;
+        // FIX 2: Duplicate Faculty Error Description
+        const facultyExists = await User.findOne({
+            $or: [
+                { username },
+                { name, role: 'faculty' }
+            ]
+        });
+
+        if (facultyExists) {
+            return res.status(400).json({ message: "Duplicate faculty detected. The same faculty cannot be added multiple times." });
         }
 
         const user = await User.create({
@@ -30,7 +44,10 @@ export const createUser = async (req, res) => {
             username,
             password, // Plain text for demo as per requirement
             role: role || 'faculty',
-            department
+            department,
+            designation,
+            facultyEmail,
+            hodEmail
         });
 
         if (user) {
@@ -40,6 +57,10 @@ export const createUser = async (req, res) => {
                 name: user.name,
                 username: user.username,
                 role: user.role,
+                department: user.department,
+                designation: user.designation,
+                facultyEmail: user.facultyEmail,
+                hodEmail: user.hodEmail,
             });
         } else {
             res.status(400).json({ message: "Invalid user data" });
@@ -75,6 +96,9 @@ export const updateUser = async (req, res) => {
         if (user) {
             user.name = req.body.name || user.name;
             user.department = req.body.department || user.department;
+            if (req.body.designation !== undefined) user.designation = req.body.designation;
+            if (req.body.facultyEmail !== undefined) user.facultyEmail = req.body.facultyEmail;
+            if (req.body.hodEmail !== undefined) user.hodEmail = req.body.hodEmail;
 
             if (req.body.password) {
                 user.password = req.body.password;
@@ -95,6 +119,9 @@ export const updateUser = async (req, res) => {
                 username: updatedUser.username,
                 role: updatedUser.role,
                 department: updatedUser.department,
+                designation: updatedUser.designation,
+                facultyEmail: updatedUser.facultyEmail,
+                hodEmail: updatedUser.hodEmail,
                 password: updatedUser.password,
                 isSelectedForGeneration: updatedUser.isSelectedForGeneration
             });

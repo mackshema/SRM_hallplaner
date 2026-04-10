@@ -70,7 +70,15 @@ const AdminDashboard = () => {
                 <SidebarMenuButton asChild>
                   <Link to="/admin/seating-plans">
                     <LayoutGrid className="h-4 w-4" />
-                    <span>Seating Plans</span>
+                    <span>Internal Examination Seating</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to="/admin/anna-university">
+                    <Building2 className="h-4 w-4" />
+                    <span>Anna University Seating</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -87,6 +95,14 @@ const AdminDashboard = () => {
                   <Link to="/admin/faculty">
                     <Users className="h-4 w-4" />
                     <span>Faculty</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to="/admin/students">
+                    <Users className="h-4 w-4" />
+                    <span>Students</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

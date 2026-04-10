@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
     Card,
     CardContent,
@@ -11,8 +11,22 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/use-toast";
-import { Loader2, Search, MapPin, Calendar, Clock, ArrowLeft } from "lucide-react";
+import { Loader2, MapPin, Calendar, Clock, LogOut, KeyRound, User as UserIcon, Settings } from "lucide-react";
+import { getCurrentUser, logout } from "@/lib/auth";
 
 interface ExamDetail {
     hall: string;
@@ -21,110 +35,163 @@ interface ExamDetail {
     session: string;
     time: string;
     rollNumber: string;
+    seatPosition: string; // NEW property for Seat Number feature
 }
 
 const StudentLookup = () => {
-    const [rollNumber, setRollNumber] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [examDetails, setExamDetails] = useState<ExamDetail[] | null>(null);
     const [hasSearched, setHasSearched] = useState(false);
 
-    const handleLookup = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!rollNumber.trim()) return;
+    // Password change state
+    const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+    const [currentPassword, setCurrentPassword] = useState("");
+    const [newPassword, setNewPassword] = useState("");
+    const [isChangingPassword, setIsChangingPassword] = useState(false);
 
-        setIsLoading(true);
-        setExamDetails(null);
-        setHasSearched(false);
+    const currentUser = getCurrentUser();
+    const navigate = useNavigate();
 
-        try {
-            // Backend URL - Adjust based on environment
-            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/${rollNumber.trim()}`);
+    useEffect(() => {
+        if (!currentUser || currentUser.role !== 'student') {
+            navigate("/login");
+            return;
+        }
 
-            if (response.ok) {
-                const data = await response.json();
-                setExamDetails(data);
-            } else {
-                const errorData = await response.json();
+        const fetchDetails = async () => {
+            setIsLoading(true);
+            try {
+                const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/${currentUser.username}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setExamDetails(data);
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    toast({
+                        title: "Notice",
+                        description: errorData.message || "No Exam Assignment Found.",
+                        variant: "default",
+                    });
+                }
+            } catch (error) {
+                console.error("Lookup failed:", error);
                 toast({
-                    title: "Not Found",
-                    description: errorData.message || "No Exam Assignment Found. Please contact Examination Cell.",
+                    title: "Error",
+                    description: "Failed to connect to the server. Please try again later.",
                     variant: "destructive",
                 });
+            } finally {
+                setIsLoading(false);
+                setHasSearched(true);
             }
-        } catch (error) {
-            console.error("Lookup failed:", error);
+        };
+
+        fetchDetails();
+    }, [currentUser, navigate]);
+
+    const handleLogout = () => {
+        logout();
+        navigate("/login");
+    };
+
+    const validatePassword = (password: string) => {
+        const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+        return strongPasswordRegex.test(password);
+    };
+
+    const handleChangePassword = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!currentPassword || !newPassword) return;
+
+        if (!validatePassword(newPassword)) {
             toast({
-                title: "Error",
-                description: "Failed to connect to the server. Please try again later.",
+                title: "Weak Password",
+                description: "Password must be at least 8 characters and include uppercase, lowercase, numbers, and special characters.",
                 variant: "destructive",
             });
+            return;
+        }
+
+        setIsChangingPassword(true);
+        try {
+            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/change-password`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    username: currentUser!.username,
+                    currentPassword,
+                    newPassword
+                })
+            });
+
+            if (response.ok) {
+                toast({ title: "Success", description: "Password updated successfully." });
+                setIsPasswordModalOpen(false);
+                setCurrentPassword("");
+                setNewPassword("");
+            } else {
+                const err = await response.json().catch(() => ({ message: "Failed to update password." }));
+                toast({ title: "Error", description: err.message, variant: "destructive" });
+            }
+        } catch (error) {
+            console.error("Error changing password:", error);
+            toast({ title: "Error", description: "Network error occurred.", variant: "destructive" });
         } finally {
-            setIsLoading(false);
-            setHasSearched(true);
+            setIsChangingPassword(false);
         }
     };
 
+    if (!currentUser) return null;
+
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-            <div className="w-full max-w-lg space-y-6">
-                {/* Logo or Title area */}
-                <div className="text-center space-y-2">
-                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">Hall Harmony Planner</h1>
-                    <p className="text-slate-500">Student Exam Hall Finder</p>
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4">
+
+            {/* Header / Navbar */}
+            <div className="w-full max-w-3xl flex justify-between items-center mb-8 bg-white p-4 rounded-lg shadow-sm">
+                <div className="flex items-center gap-2">
+                    <UserIcon className="h-6 w-6 text-primary" />
+                    <div>
+                        <h2 className="font-bold text-lg leading-tight">{currentUser.name}</h2>
+                        <p className="text-xs text-slate-500">{currentUser.username}</p>
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm">
+                                <Settings className="h-4 w-4 mr-1" />
+                                Settings
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem onClick={() => setIsPasswordModalOpen(true)} className="cursor-pointer">
+                                <KeyRound className="h-4 w-4 mr-2" />
+                                Change Password
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50">
+                                <LogOut className="h-4 w-4 mr-2" />
+                                Logout
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+            </div>
+
+            <div className="w-full max-w-3xl space-y-6">
+                <div className="text-center space-y-2 mb-8">
+                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">Student Dashboard</h1>
+                    <p className="text-slate-500">Your Exam Seating Arrangements</p>
                 </div>
 
-                <Card className="border-none shadow-xl bg-white/80 backdrop-blur-md">
-                    <CardHeader>
-                        <CardTitle className="text-xl">Find Your Exam Hall</CardTitle>
-                        <CardDescription>
-                            Enter your Roll Number to view your seating arrangement and exam details.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <form onSubmit={handleLookup} className="space-y-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="rollNumber">Roll Number</Label>
-                                <div className="relative">
-                                    <Input
-                                        id="rollNumber"
-                                        placeholder="e.g. 911123149016"
-                                        className="pl-10 h-12 text-lg"
-                                        value={rollNumber}
-                                        onChange={(e) => setRollNumber(e.target.value)}
-                                        required
-                                    />
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-                                </div>
-                            </div>
-                            <Button
-                                type="submit"
-                                className="w-full h-12 text-lg font-medium transition-all hover:scale-[1.01]"
-                                disabled={isLoading}
-                            >
-                                {isLoading ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                        Searching...
-                                    </>
-                                ) : (
-                                    "Find My Hall"
-                                )}
-                            </Button>
-                        </form>
-                    </CardContent>
-                    <CardFooter className="justify-center border-t py-4">
-                        <Link to="/login" className="text-sm text-slate-500 hover:text-primary flex items-center transition-colors">
-                            <ArrowLeft className="mr-1 h-3 w-3" />
-                            Staff Login
-                        </Link>
-                    </CardFooter>
-                </Card>
+                {isLoading && (
+                    <div className="flex justify-center p-12">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                )}
 
                 {/* Results Area */}
-                {hasSearched && examDetails && examDetails.length > 0 && (
+                {!isLoading && hasSearched && examDetails && examDetails.length > 0 && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        <h3 className="text-lg font-semibold px-1">Your Exam Details:</h3>
                         {examDetails.map((detail, index) => (
                             <Card key={index} className="overflow-hidden border-l-4 border-l-primary shadow-md">
                                 <CardContent className="p-6">
@@ -138,6 +205,16 @@ const StudentLookup = () => {
                                                     <p className="text-sm font-medium text-slate-500 italic">Location</p>
                                                     <p className="font-semibold text-lg">{detail.hall}</p>
                                                     <p className="text-slate-600">{detail.floor}</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-start gap-3">
+                                                <div className="mt-1 bg-blue-50 p-2 rounded-full text-blue-600">
+                                                    <UserIcon className="h-4 w-4" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-medium text-slate-500 italic">Seat Position</p>
+                                                    <p className="font-semibold text-lg text-blue-700">{detail.seatPosition || "Not Assigned"}</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -175,13 +252,59 @@ const StudentLookup = () => {
                     </div>
                 )}
 
-                {hasSearched && (!examDetails || examDetails.length === 0) && (
-                    <div className="text-center p-8 rounded-lg border-2 border-dashed border-slate-200 text-slate-500 animate-in fade-in duration-300">
+                {!isLoading && hasSearched && (!examDetails || examDetails.length === 0) && (
+                    <div className="text-center p-8 bg-white rounded-lg shadow-sm border-2 border-dashed border-slate-200 text-slate-500 animate-in fade-in duration-300">
                         <p className="font-medium text-lg">No Exam Assignment Found.</p>
-                        <p className="text-sm">Please contact the Examination Cell for assistance.</p>
+                        <p className="text-sm">Please contact the Examination Cell for assistance or check back later.</p>
                     </div>
                 )}
             </div>
+
+            {/* Change Password Modal */}
+            <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Change Password</DialogTitle>
+                    </DialogHeader>
+                    <form onSubmit={handleChangePassword}>
+                        <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="currentPassword">Current Password</Label>
+                                <Input
+                                    id="currentPassword"
+                                    type="password"
+                                    value={currentPassword}
+                                    onChange={(e) => setCurrentPassword(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="newPassword">New Password</Label>
+                                <Input
+                                    id="newPassword"
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    required
+                                    minLength={8}
+                                />
+                                <p className="text-xs text-slate-500 mt-2">
+                                    Include uppercase & lowercase letters, numbers, and special characters.
+                                    <br />
+                                    <b>EXAMPLE OF MIXED CHARACTERS USED: Student@2026</b>
+                                </p>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setIsPasswordModalOpen(false)}>Cancel</Button>
+                            <Button type="submit" disabled={isChangingPassword}>
+                                {isChangingPassword ? "Saving..." : "Update Password"}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
         </div>
     );
 };
