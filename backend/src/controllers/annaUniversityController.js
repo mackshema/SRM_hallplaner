@@ -3,6 +3,7 @@ import AnnaExamData from '../models/AnnaExamData.js';
 import AnnaSeating from '../models/AnnaSeating.js';
 import Hall from '../models/Hall.js';
 import User from '../models/User.js';
+import FacultyDuty from '../models/FacultyDuty.js';
 
 export const getExamData = async (req, res) => {
   try {
@@ -163,6 +164,73 @@ export const uploadTimetable = async (req, res) => {
   }
 };
 
+export const manualMapSubject = async (req, res) => {
+  try {
+    const { subjectCode, examDate, session, type, program, year, department, rollNumber } = req.body;
+    
+    if (!subjectCode || !examDate || !session || !type) {
+      return res.status(400).json({ error: "Missing required fields for manual mapping." });
+    }
+
+    if (type === 'department') {
+      if (!department || !year) return res.status(400).json({ error: "Department and Year are required." });
+      
+      await AnnaExamData.updateOne(
+        { subjectCode, department, year, examDate, session },
+        { $set: { subjectCode, department, year, examDate, session, rollNumber: "" } },
+        { upsert: true }
+      );
+      return res.json({ success: true, message: `Mapped ${subjectCode} for generic department ${department} (${year}).` });
+      
+    } else if (type === 'rollNumber') {
+      if (!rollNumber) return res.status(400).json({ error: "Roll Number is required." });
+      
+      const rollNumbersArray = typeof rollNumber === 'string' 
+          ? rollNumber.split(',').map(r => r.trim()).filter(Boolean)
+          : Array.isArray(rollNumber) ? rollNumber : [rollNumber];
+          
+      if (rollNumbersArray.length === 0) return res.status(400).json({ error: "No valid roll numbers provided." });
+
+      const missingRolls = [];
+      const successfulMappings = [];
+      
+      for (const r of rollNumbersArray) {
+        const student = await User.findOne({ username: r, role: 'student' });
+        if (!student) {
+          missingRolls.push(r);
+          continue;
+        }
+        
+        await AnnaExamData.updateOne(
+          { subjectCode, rollNumber: r, examDate, session },
+          { $set: { subjectCode, rollNumber: r, examDate, session, department: student.department || "Unknown", year: student.degree || "", studentName: student.name } },
+          { upsert: true }
+        );
+        successfulMappings.push({ rollNumber: r, name: student.name, year: student.degree, department: student.department });
+      }
+      
+      if (missingRolls.length > 0) {
+         if (successfulMappings.length === 0) {
+             return res.status(404).json({ error: `The following roll numbers are not in the database: ${missingRolls.join(', ')}` });
+         } else {
+             return res.status(200).json({ 
+                 success: true,
+                 partialError: `Successfully mapped ${successfulMappings.length} students. WARNING: The following roll numbers are not in database: ${missingRolls.join(', ')}`,
+                 mapped: successfulMappings
+             });
+         }
+      }
+      
+      return res.json({ success: true, message: `Mapped ${subjectCode} for ${successfulMappings.length} student(s).`, mapped: successfulMappings });
+    } else {
+      return res.status(400).json({ error: "Invalid mapping type." });
+    }
+  } catch (err) {
+    console.error("Error in manual map:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const generateAnnaSeating = async (req, res) => {
   try {
     const { examDate, session, maxPerHall = 25, seatsPerBench: spb = 2 } = req.body;
@@ -185,11 +253,18 @@ export const generateAnnaSeating = async (req, res) => {
 
     const students = [];
     for (const user of allStudents) {
-      // For each student, check if their department and year has a subject scheduled today
-      const mappedSubject = scheduledSubjects.find(sub => 
-          sub.department === user.department && 
-          sub.year === user.degree
-      );
+      // Check if student has explicit rollNumber mapping for this date/session
+      let mappedSubject = scheduledSubjects.find(sub => sub.rollNumber === user.username);
+      
+      // Otherwise, check if their department and year has a global subject arranged
+      if (!mappedSubject) {
+        mappedSubject = scheduledSubjects.find(sub => 
+            sub.department === user.department && 
+            sub.year === user.degree &&
+            !sub.rollNumber // ensure it's a generic map
+        );
+      }
+      
       if (mappedSubject) {
         students.push({
           rollNumber: user.username,
@@ -222,15 +297,6 @@ export const generateAnnaSeating = async (req, res) => {
       return res.status(400).json({ error: "No halls selected for generation" });
     }
 
-    // Anna University Rule Validation: A hall MUST have exactly 2 columns (meaning 2 students per bench width)
-    for (const hall of halls) {
-      if (hall.columns > 2) {
-         return res.status(400).json({ 
-           error: `Hall ${hall.name} has a configuration of ${hall.rows}x${hall.columns}. Anna University seating STRICTLY permits exactly 2 members per bench. Please go to Exam Halls page, edit this hall, and change its columns to 2.` 
-         });
-      }
-    }
-
     const allAssignments = [];
     let studentQueue = [...students];
 
@@ -255,10 +321,11 @@ export const generateAnnaSeating = async (req, res) => {
         Array(hall.columns * spb).fill(null)
       );
 
-      // Attempt to place students
-      for (let r = 0; r < hall.rows; r++) {
-        for (let c = 0; c < hall.columns; c++) {
-          for (let p = 0; p < spb; p++) {
+      // Attempt to place students (Vertical)
+      for (let c = 0; c < hall.columns; c++) {
+        for (let p = 0; p < spb; p++) {
+          
+          for (let r = 0; r < hall.rows; r++) {
             if (capacityUsed >= hallMax) break;
 
             const gridX = c * spb + p;
@@ -269,6 +336,7 @@ export const generateAnnaSeating = async (req, res) => {
             for (let q = 0; q < studentQueue.length; q++) {
               const candidate = studentQueue[q];
               const candDept = candidate.department;
+              const candSubj = candidate.subjectCode;
 
               // Check Adjacency
               const checkAdjacency = () => {
@@ -277,7 +345,12 @@ export const generateAnnaSeating = async (req, res) => {
                   const ny = gridY + dy;
                   const nx = gridX + dx;
                   if (ny >= 0 && ny < hall.rows && nx >= 0 && nx < hall.columns * spb) {
-                    if (grid[ny][nx] && grid[ny][nx].department === candDept) return true;
+                    const neighbor = grid[ny][nx];
+                    if (neighbor) {
+                       // Rule: no same department, or same exam sit together
+                       if (neighbor.department === candDept) return true;
+                       if (neighbor.subjectCode === candSubj) return true;
+                    }
                   }
                 }
                 return false;
@@ -305,10 +378,6 @@ export const generateAnnaSeating = async (req, res) => {
               }
             }
             if (!placed && studentQueue.length > 0) {
-              // Forced fallback if layout gets stuck due to strictly isolated remaining departments.
-              // To avoid infinity loops or extremely sparse halls: just grab the first despite constraint,
-              // or leave seat empty. Opting to leave empty to strictly honor requirement? 
-              // The user said: "STRICT Department Separation Rule... Show clear errors 'Unable to satisfy seating constraints'".
               console.log("Could not satisfy constraint for seat", r, c, p);
             }
           }
@@ -326,6 +395,21 @@ export const generateAnnaSeating = async (req, res) => {
       });
     }
 
+    // --- Added Faculty Allocation for Anna University ---
+    const allFaculty = await User.find({ role: 'faculty' }).lean();
+    let fIndex = 0;
+    for (const hall of halls) {
+       let req = hall.facultyRequired || 1;
+       const hallAssignedIds = [];
+       for (let i=0; i < req; i++) {
+          if (fIndex < allFaculty.length) {
+             hallAssignedIds.push(allFaculty[fIndex]._id);
+             fIndex++;
+          }
+       }
+       await Hall.findByIdAndUpdate(hall._id, { facultyAssigned: hallAssignedIds });
+    }
+
     // Save Seating
     const newSeating = new AnnaSeating({
       examDate,
@@ -335,6 +419,16 @@ export const generateAnnaSeating = async (req, res) => {
     await newSeating.save();
 
     res.json({ success: true, count: allAssignments.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const getAllSeatingPlans = async (req, res) => {
+  try {
+    const plans = await AnnaSeating.find({}).sort({ examDate: 1, session: 1 });
+    res.json(plans);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -370,8 +464,233 @@ export const updateStatus = async (req, res) => {
       { $set: updatePayload },
       { new: true }
     );
+    
+    // If finalizing, create FacultyDuties for dashboard
+    if (status === "FINAL" && plan) {
+       const newDuties = [];
+       // Get unique halls in this plan
+       const hallIds = [...new Set(plan.assignments.map(a => a.hallId))];
+       if (hallIds.length > 0) {
+           const activeHalls = await Hall.find({ _id: { $in: hallIds } });
+           for (const h of activeHalls) {
+               if (h.facultyAssigned && h.facultyAssigned.length > 0) {
+                   for (const fId of h.facultyAssigned) {
+                       newDuties.push({
+                           facultyId: fId,
+                           hallId: h._id,
+                           examDate,
+                           examSession: session,
+                           examTime: "09:30 AM" // Anna Default
+                       });
+                   }
+               }
+           }
+       }
+       if (newDuties.length > 0) {
+           await FacultyDuty.insertMany(newDuties);
+       }
+    }
+
     if (!plan) return res.status(404).json({ error: "Seating plan not found" });
     res.json(plan);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteSeatingPlan = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const plan = await AnnaSeating.findByIdAndDelete(id);
+    if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+    // Also remove associated faculty duties if they were finalized
+    await FacultyDuty.deleteMany({ examDate: plan.examDate, examSession: plan.session });
+
+    res.json({ success: true, message: "Plan deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting plan:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const generateAllAnnaSeating = async (req, res) => {
+  try {
+    const { maxPerHall = 25, seatsPerBench: spb = 2 } = req.body;
+    
+    // Get all distinct sessions
+    const scheduledSubjects = await AnnaExamData.find({}).lean();
+    if (scheduledSubjects.length === 0) {
+      return res.status(400).json({ error: "No timetable mappings found." });
+    }
+
+    const uniqueSessions = [];
+    scheduledSubjects.forEach(s => {
+       if (!uniqueSessions.find(u => u.examDate === s.examDate && u.session === s.session)) {
+           uniqueSessions.push({ examDate: s.examDate, session: s.session });
+       }
+    });
+
+    const allStudents = await User.find({ role: 'student' }).lean();
+    if(allStudents.length === 0) {
+      return res.status(400).json({ error: "No students exist in the main database." });
+    }
+
+    const halls = await Hall.find({ isSelected: true }).lean();
+    if (halls.length === 0) {
+      return res.status(400).json({ error: "No halls selected for generation" });
+    }
+
+    let generatedCount = 0;
+    let skippedCount = 0;
+
+    for (const { examDate, session } of uniqueSessions) {
+       // Check existing
+       const existing = await AnnaSeating.findOne({ examDate, session });
+       if (existing) {
+          skippedCount++;
+          continue; // Don't disturb existing
+       }
+
+       const activeSubjects = scheduledSubjects.filter(sub => sub.examDate === examDate && sub.session === session);
+       
+       const students = [];
+       for (const user of allStudents) {
+         let mappedSubject = activeSubjects.find(sub => sub.rollNumber === user.username);
+         if (!mappedSubject) {
+           mappedSubject = activeSubjects.find(sub => 
+               sub.department === user.department && 
+               sub.year === user.degree &&
+               !sub.rollNumber 
+           );
+         }
+         
+         if (mappedSubject) {
+           students.push({
+             rollNumber: user.username,
+             studentName: user.name,
+             department: user.department,
+             subjectCode: mappedSubject.subjectCode
+           });
+         }
+       }
+
+       if (students.length === 0) continue; 
+
+       students.sort((a, b) => {
+         if (a.subjectCode < b.subjectCode) return -1;
+         if (a.subjectCode > b.subjectCode) return 1;
+         
+         const numA = parseInt(a.rollNumber.replace(/\D/g, ''));
+         const numB = parseInt(b.rollNumber.replace(/\D/g, ''));
+         if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+         
+         return a.rollNumber.localeCompare(b.rollNumber, undefined, { numeric: true });
+       });
+
+       const allAssignments = [];
+       let studentQueue = [...students];
+
+       for (const hall of halls) {
+         if (studentQueue.length === 0) break;
+
+         const assignmentInHall = [];
+         let capacityUsed = 0;
+         
+         const hallMax = Math.min(
+           maxPerHall,
+           hall.rows * hall.columns * spb
+         );
+
+         const grid = Array(hall.rows).fill(null).map(() => 
+           Array(hall.columns * spb).fill(null)
+         );
+
+         for (let c = 0; c < hall.columns; c++) {
+           for (let p = 0; p < spb; p++) {
+             for (let r = 0; r < hall.rows; r++) {
+               if (capacityUsed >= hallMax) break;
+
+               const gridX = c * spb + p;
+               const gridY = r;
+
+               let placed = false;
+               for (let q = 0; q < studentQueue.length; q++) {
+                 const candidate = studentQueue[q];
+                 const candDept = candidate.department;
+                 const candSubj = candidate.subjectCode;
+
+                 const checkAdjacency = () => {
+                   const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]]; 
+                   for (const [dy, dx] of dirs) {
+                     const ny = gridY + dy;
+                     const nx = gridX + dx;
+                     if (ny >= 0 && ny < hall.rows && nx >= 0 && nx < hall.columns * spb) {
+                       const neighbor = grid[ny][nx];
+                       if (neighbor) {
+                          if (neighbor.department === candDept) return true;
+                          if (neighbor.subjectCode === candSubj) return true;
+                       }
+                     }
+                   }
+                   return false;
+                 };
+
+                 if (!checkAdjacency()) {
+                   grid[gridY][gridX] = candidate;
+                   studentQueue.splice(q, 1);
+                   
+                   assignmentInHall.push({
+                     hallId: hall._id,
+                     hallName: hall.name,
+                     row: r + 1,
+                     column: c + 1,
+                     benchPosition: p + 1,
+                     rollNumber: candidate.rollNumber,
+                     subjectCode: candidate.subjectCode,
+                     department: candidate.department
+                   });
+                   
+                   capacityUsed++;
+                   placed = true;
+                   break;
+                 }
+               }
+             }
+           }
+         }
+
+         if (assignmentInHall.length > 0) {
+           allAssignments.push(...assignmentInHall);
+         }
+       }
+
+       const newSeating = new AnnaSeating({
+         examDate,
+         session,
+         assignments: allAssignments
+       });
+       await newSeating.save();
+       generatedCount++;
+
+       const allFaculty = await User.find({ role: 'faculty' }).lean();
+       let fIndex = 0;
+       for (const hall of halls) {
+          let req = hall.facultyRequired || 1;
+          const hallAssignedIds = [];
+          for (let i=0; i < req; i++) {
+             if (fIndex < allFaculty.length) {
+                hallAssignedIds.push(allFaculty[fIndex]._id);
+                fIndex++;
+             }
+          }
+          await Hall.findByIdAndUpdate(hall._id, { facultyAssigned: hallAssignedIds });
+       }
+    }
+
+    res.json({ success: true, count: generatedCount, skipped: skippedCount });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

@@ -24,6 +24,14 @@ const settingsSchema = new mongoose.Schema({
     examName: {
         type: String,
         default: 'INTERNAL ASSESSMENT TEST – II (Except I Year)'
+    },
+    leftLogo: {
+        type: String,
+        default: ''
+    },
+    rightLogo: {
+        type: String,
+        default: ''
     }
 }, { timestamps: true });
 

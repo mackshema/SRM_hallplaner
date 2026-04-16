@@ -1,6 +1,5 @@
 import SeatAssignment from "../models/SeatAssignment.js";
 import Hall from "../models/Hall.js";
-import Department from "../models/Department.js";
 import ExamSession from "../models/ExamSession.js";
 import User from "../models/User.js";
 const Faculty = User; // Alias for readability in this file
@@ -206,47 +205,34 @@ export const generateSeatingPlan = async (req, res) => {
       return res.status(400).json({ message: "No halls found/selected for this session" });
     }
 
-    // Sync departments from frontend to MongoDB
-    let departments = [];
-    if (frontendDepartments && Array.isArray(frontendDepartments) && frontendDepartments.length > 0) {
-      for (const dept of frontendDepartments) {
-        const existingDept = await Department.findOneAndUpdate(
-          {
-            name: dept.name,
-            rollNumberStart: dept.rollNumberStart,
-            rollNumberEnd: dept.rollNumberEnd,
-          },
-          {
-            name: dept.name,
-            rollNumberStart: dept.rollNumberStart,
-            rollNumberEnd: dept.rollNumberEnd,
-          },
-          { upsert: true, new: true }
-        );
-        departments.push(existingDept);
-      }
-    } else {
-      departments = await Department.find({ isSelected: true });
+    // Fetch students from the database directly instead of departments
+    const allStudents = await User.find({ role: "student", isSelected: true }).sort({ username: 1 }).lean();
+    if (!allStudents.length) {
+      return res.status(400).json({ message: "No students found in the database. Please add students first." });
     }
 
-    if (!departments.length) {
-      return res.status(400).json({ message: "No departments found. Please create departments first." });
-    }
+    const deptMap = {};
+    allStudents.forEach(student => {
+        const dept = student.department || "Unknown";
+        if (!deptMap[dept]) {
+            deptMap[dept] = [];
+        }
+        deptMap[dept].push(student.username);
+    });
+
+    const departments = Object.keys(deptMap).map(deptName => ({
+        _id: deptName,
+        name: deptName
+    }));
 
     // FIX 4: Skip Roll Number Validation
     const invalidSkips = [];
     for (const skip of skipRollNumbers) {
       const skipStr = String(skip).trim();
       if (!skipStr) continue;
-      const skipNum = Number(skipStr);
-      let isValid = false;
-      for (const dept of departments) {
-        if (skipNum >= Number(dept.rollNumberStart) && skipNum <= Number(dept.rollNumberEnd)) {
-          isValid = true;
-          break;
-        }
+      if (!allStudents.some(s => s.username === skipStr)) {
+          invalidSkips.push(skipStr);
       }
-      if (!isValid) invalidSkips.push(skipStr);
     }
 
     if (invalidSkips.length > 0) {
@@ -266,27 +252,21 @@ export const generateSeatingPlan = async (req, res) => {
     const deptQueues = {};
     departments.forEach((dept) => {
       deptQueues[dept._id] = [];
-      for (
-        let r = Number(dept.rollNumberStart);
-        r <= Number(dept.rollNumberEnd);
-        r++
-      ) {
-        const rollStr = r.toString();
+      const rolls = deptMap[dept._id] || [];
+      rolls.forEach((rollStr) => {
         if (!skipSet.has(rollStr) && !manualSet.has(rollStr)) {
           deptQueues[dept._id].push(rollStr);
         }
-      }
+      });
     });
 
     // Add manual roll numbers (Priority)
     manualSet.forEach((manualRoll) => {
-      const rollNum = Number(manualRoll);
-      for (const dept of departments) {
-        const start = Number(dept.rollNumberStart);
-        const end = Number(dept.rollNumberEnd);
-        if (rollNum >= start && rollNum <= end) {
-          deptQueues[dept._id].unshift(manualRoll);
-          break;
+      const student = allStudents.find(s => s.username === manualRoll);
+      if (student) {
+        const deptId = student.department || "Unknown";
+        if (deptQueues[deptId]) {
+          deptQueues[deptId].unshift(manualRoll);
         }
       }
     });
@@ -399,70 +379,157 @@ export const generateSeatingPlan = async (req, res) => {
         seatsFilled++;
       }
 
-      const batchDeptIds = Array.from(hallBatch.keys());
-      let batchPtr = 0;
+      // ─────────────────────────────────────────────────────────────────────
+      // PLACEMENT HELPERS
+      //   tryPlace         – tests all 4 adjacency constraints before placing
+      //   getStudentFromDept – prefers hallBatch; falls back to global queue
+      //                        (exceptional fill so no seat is left empty when
+      //                         students are globally available)
+      // ─────────────────────────────────────────────────────────────────────
 
-      // Fill Regular Seats
+      // Rebuild batchDeptIds after pre-fill (includes any globally pulled depts)
+      const batchDeptIds = Array.from(hallBatch.keys()).filter(d => hallBatch.get(d).length > 0);
+      const singleDept   = batchDeptIds.length === 1;
+
+      const grid = Array(hall.rows + 1).fill(null)
+        .map(() => Array(hall.columns * hall.seatsPerBench + 1).fill(null));
+
+      const tryPlaceHere = (dId, gridX, gridY, benchPos1Dept, seat) => {
+        // Rule 1 – bench-mate: seat-2 dept ≠ seat-1 dept on the same bench
+        if (seat > 1 && benchPos1Dept === dId) return false;
+        // Rule 2 – left neighbor
+        if (gridX > 1 && grid[gridY][gridX - 1] === dId) return false;
+        // Rule 3 – top neighbor (vertical adjacency)
+        if (gridY > 1 && grid[gridY - 1][gridX] === dId) return false;
+        // Rule 4 – bottom neighbor (look-ahead; prevents blocking next row)
+        if (gridY < hall.rows && grid[gridY + 1] && grid[gridY + 1][gridX] === dId) return false;
+        // Rule 5 – right neighbor (already checked by the NEXT seat's rule-2, but guard here)
+        if (gridX < hall.columns * hall.seatsPerBench && grid[gridY][gridX + 1] === dId) return false;
+        // Rule 6 – blocked dept combinations
+        if (isPairBlocked) {
+          const neighbors = [];
+          if (grid[gridY][gridX - 1] && grid[gridY][gridX - 1] !== '__EMPTY__') neighbors.push(grid[gridY][gridX - 1]);
+          if (grid[gridY - 1]?.[gridX] && grid[gridY - 1][gridX] !== '__EMPTY__') neighbors.push(grid[gridY - 1][gridX]);
+          for (const nDept of neighbors) {
+            if (isPairBlocked(dId, nDept)) return false;
+          }
+        }
+        return true;
+      };
+
+      const getStudentFromDeptSC = (dId) => {
+        const bQueue = hallBatch.get(dId);
+        if (bQueue && bQueue.length > 0) return bQueue.shift();
+        // Exceptional fill – pull directly from global queue
+        if (deptQueues[dId] && deptQueues[dId].length > 0) return deptQueues[dId].shift();
+        return null;
+      };
+
+      // Fill Regular Seats – row-first (bench as a unit) for proper interleaving
       for (let row = 1; row <= hall.rows; row++) {
         for (let col = 1; col <= hall.columns; col++) {
-          for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
-            let attempts = 0;
-            while (attempts < batchDeptIds.length) {
-              const dId = batchDeptIds[batchPtr];
-              batchPtr = (batchPtr + 1) % batchDeptIds.length;
+          let benchPos1Dept = null;
 
-              const pQueue = hallBatch.get(dId);
-              if (pQueue && pQueue.length > 0) {
-                const roll = pQueue.shift();
-                assignments.push({
-                  hallId: hall._id,
-                  row,
-                  column: col,
-                  benchPosition: seat,
-                  studentRollNumber: roll,
-                  departmentId: dId,
-                  examDate,
-                  examSession,
-                  examTime,
-                  examSessionId,
-                });
-                break;
-              }
-              attempts++;
+          for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
+            const gridX = (col - 1) * hall.seatsPerBench + seat;
+            const gridY = row;
+
+            // Single-dept rule: leave bench position 2+ empty
+            if (singleDept && seat > 1) {
+              grid[gridY][gridX] = '__EMPTY__';
+              continue;
+            }
+
+            let placed = false;
+
+            // Candidate list: batch depts first, then any globally available dept
+            const globalExtras = shuffledDeptIds.filter(
+              d => !batchDeptIds.includes(d) && deptQueues[d].length > 0
+            );
+            const candidateDepts = [...batchDeptIds, ...globalExtras];
+
+            for (let attempt = 0; attempt < candidateDepts.length; attempt++) {
+              const dId = candidateDepts[attempt];
+
+              if (!tryPlaceHere(dId, gridX, gridY, benchPos1Dept, seat)) continue;
+
+              const roll = getStudentFromDeptSC(dId);
+              if (roll === null) continue;
+
+              if (!hallBatch.has(dId)) hallBatch.set(dId, []);
+              grid[gridY][gridX] = dId;
+              if (seat === 1) benchPos1Dept = dId;
+
+              assignments.push({
+                hallId: hall._id,
+                row,
+                column: col,
+                benchPosition: seat,
+                studentRollNumber: roll,
+                departmentId: dId,
+                examDate,
+                examSession,
+                examTime,
+                examSessionId,
+              });
+              placed = true;
+              break;
+            }
+
+            // If no dept can be placed without violating rules — leave empty
+            if (!placed) {
+              grid[gridY][gridX] = '__EMPTY__';
             }
           }
         }
       }
 
-      // Fill Extra Benches
+      // Fill Extra Benches (bench-mate + exceptional fill; no grid adjacency for isolated benches)
       if (hall.extraBenches && hall.extraBenches.length > 0) {
         for (const bench of hall.extraBenches) {
-          for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
-            let attempts = 0;
-            while (attempts < batchDeptIds.length) {
-              const dId = batchDeptIds[batchPtr];
-              batchPtr = (batchPtr + 1) % batchDeptIds.length;
+          let extraBenchPos1Dept = null;
 
-              const pQueue = hallBatch.get(dId);
-              if (pQueue && pQueue.length > 0) {
-                const roll = pQueue.shift();
-                assignments.push({
-                  hallId: hall._id,
-                  row: bench.row,
-                  column: bench.column,
-                  benchPosition: seat,
-                  studentRollNumber: roll,
-                  departmentId: dId,
-                  examDate,
-                  examSession,
-                  examTime,
-                  examSessionId,
-                  isExtraBench: true,
-                });
-                break;
-              }
-              attempts++;
+          for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
+            // Single-dept rule: leave bench position 2+ empty
+            if (singleDept && seat > 1) continue;
+
+            let placed = false;
+
+            const globalExtras = shuffledDeptIds.filter(
+              d => !batchDeptIds.includes(d) && deptQueues[d].length > 0
+            );
+            const candidateDepts = [...batchDeptIds, ...globalExtras];
+
+            for (let attempt = 0; attempt < candidateDepts.length; attempt++) {
+              const dId = candidateDepts[attempt];
+
+              // Bench-mate constraint only for extra benches (isolated from main grid)
+              if (seat > 1 && extraBenchPos1Dept === dId) continue;
+
+              const roll = getStudentFromDeptSC(dId);
+              if (roll === null) continue;
+
+              if (!hallBatch.has(dId)) hallBatch.set(dId, []);
+              if (seat === 1) extraBenchPos1Dept = dId;
+
+              assignments.push({
+                hallId: hall._id,
+                row: bench.row,
+                column: bench.column,
+                benchPosition: seat,
+                studentRollNumber: roll,
+                departmentId: dId,
+                examDate,
+                examSession,
+                examTime,
+                examSessionId,
+                isExtraBench: true,
+              });
+              placed = true;
+              break;
             }
+            // If no eligible dept — leave empty rather than violate rules
+            if (!placed) continue;
           }
         }
       }
@@ -577,8 +644,17 @@ export const generateSeatingPlan = async (req, res) => {
       [shuffledFaculty[i], shuffledFaculty[j]] = [shuffledFaculty[j], shuffledFaculty[i]];
     }
 
-    // Iterate Halls
+    // Only assign faculty to halls that actually received students
+    const hallsWithStudents = new Set(assignments.map(a => a.hallId.toString()));
+
+    // Iterate Halls — skip empty halls
     for (const hall of orderedHalls) {
+      if (!hallsWithStudents.has(hall._id.toString())) {
+        // Clear any stale faculty from a previous run for this now-empty hall
+        await Hall.findByIdAndUpdate(hall._id, { facultyAssigned: [] });
+        continue; // No students → no faculty needed
+      }
+
       const required = hall.facultyRequired || 1;
       const hallAssignedIds = [];
 

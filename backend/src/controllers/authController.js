@@ -58,8 +58,7 @@ export const seedUsers = async (req, res) => {
 
         const users = [
             { name: "Admin User", username: "SRM@Admin", password: "Admin@12345678", role: "admin" },
-            { name: "Faculty User", username: "faculty@1234", password: "srm@123456789", role: "faculty" },
-            { name: "Demo Student", username: "911123149001", password: hashedStudentPassword, role: "student", email: "student@example.com" }
+            { name: "Faculty User", username: "faculty@1234", password: "srm@123456789", role: "faculty" }
         ];
 
         await User.insertMany(users);

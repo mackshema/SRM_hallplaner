@@ -252,57 +252,28 @@ class DatabaseService {
   }
 
   // ------------------------------------------------------------------
-  // DEPARTMENTS
+  // DEPARTMENTS — removed; departments are now derived from student data
+  // These stubs are kept for backward compatibility with any unused references
   // ------------------------------------------------------------------
 
   async getAllDepartments(examSessionId?: string): Promise<Department[]> {
-    try {
-      const url = examSessionId
-        ? `${this.apiUrl}/departments?examSessionId=${examSessionId}`
-        : `${this.apiUrl}/departments`;
-
-      const res = await fetch(url);
-      return res.ok ? await res.json() : [];
-    } catch {
-      return [];
-    }
+    return []; // No longer using a Department collection
   }
 
   async addDepartment(department: Omit<Department, 'id' | '_id'>): Promise<Department> {
-    return this.createDepartment(department);
+    throw new Error("Department collection removed. Departments are now derived from student records.");
   }
 
-  async createDepartment(data: {
-    name: string;
-    rollNumberStart: string;
-    rollNumberEnd: string;
-    examSessionId?: string;
-  }): Promise<Department> {
-    const res = await fetch(`${this.apiUrl}/departments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data)
-    });
-    if (!res.ok) throw new Error("Failed to create department");
-    return await res.json();
+  async createDepartment(data: any): Promise<Department> {
+    throw new Error("Department collection removed.");
   }
 
-  async updateDepartment(
-    id: number | string,
-    data: Partial<Department>
-  ): Promise<Department> {
-    const res = await fetch(`${this.apiUrl}/departments/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data)
-    });
-    if (!res.ok) throw new Error("Failed to update department");
-    return await res.json();
+  async updateDepartment(id: number | string, data: Partial<Department>): Promise<Department> {
+    throw new Error("Department collection removed.");
   }
 
   async deleteDepartment(id: number | string): Promise<boolean> {
-    const res = await fetch(`${this.apiUrl}/departments/${id}`, { method: "DELETE" });
-    return res.ok;
+    return false; // No-op
   }
 
   // ------------------------------------------------------------------
@@ -357,29 +328,13 @@ class DatabaseService {
     demandFacultyIds: string[] = []
   ): Promise<{ success: boolean; unallocated: string[]; allocationResult?: any }> {
     try {
-      // Fetch session to determine active departments
-      const sessions = await this.getExamSessions();
-      const session = sessions.find(s => s._id === examSessionId);
-
-      let departments = await this.getAllDepartments();
-
-      if (session?.activeDepartments && session.activeDepartments.length > 0) {
-        departments = departments.filter(d => session.activeDepartments!.includes(d._id || String(d.id)));
-      } else {
-        // Fallback to isSelected if no session active list (legacy behavior)
-        departments = departments.filter(d => d.isSelected !== false);
-      }
-
+      // Backend now derives departments dynamically from student database
       const res = await fetch(`${this.apiUrl}/seating/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           examSessionId,
-          departments: departments.map(dept => ({
-            name: dept.name,
-            rollNumberStart: dept.rollNumberStart,
-            rollNumberEnd: dept.rollNumberEnd
-          })),
+          departments: [], // Backend ignores this now — uses student DB directly
           skipRollNumbers,
           manualRollNumbers,
           demandFacultyIds

@@ -10,9 +10,9 @@ const examSessionSchema = new mongoose.Schema(
         isPublished: { type: Boolean, default: false },
         // Configuration specific to this session
         activeHalls: [{ type: mongoose.Schema.Types.ObjectId, ref: "Hall" }],
-        activeDepartments: [{ type: mongoose.Schema.Types.ObjectId, ref: "Department" }],
+        activeDepartments: [{ type: String }],
         selectedFaculty: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-        blockedCombinations: [[{ type: mongoose.Schema.Types.ObjectId, ref: "Department" }]], // Array of department ID pairs/groups
+        blockedCombinations: [[{ type: String }]], // Array of department strings
     },
     { timestamps: true }
 );

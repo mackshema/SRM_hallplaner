@@ -24,6 +24,7 @@ const userSchema = new mongoose.Schema(
     lastDutyDate: { type: Date },
 
     isSelected: { type: Boolean, default: true },
+    program: { type: String }, // 'Engineering', 'MBA', etc.
     degree: { type: String } // For grouping students by Year/Degree
   },
   { timestamps: true }

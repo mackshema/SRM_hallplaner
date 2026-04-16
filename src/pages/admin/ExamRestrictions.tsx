@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { db, ExamSession, Department } from "@/lib/db";
+import { db, ExamSession } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2, Plus, X, Save } from "lucide-react";
 
 const ExamRestrictions = () => {
     const [sessions, setSessions] = useState<ExamSession[]>([]);
-    const [departments, setDepartments] = useState<Department[]>([]);
+    const [departments, setDepartments] = useState<string[]>([]);
     const [selectedSessionId, setSelectedSessionId] = useState("");
     const [selectedSession, setSelectedSession] = useState<ExamSession | null>(null);
 
-    // Array of restriction sets being built (each set is an array of department IDs)
+    // Array of restriction sets being built (each set is an array of department names)
     const [currentSets, setCurrentSets] = useState<string[][]>([["", ""]]);
 
     const { toast } = useToast();
@@ -23,8 +23,14 @@ const ExamRestrictions = () => {
         try {
             const sessData = await db.getExamSessions();
             setSessions(sessData);
-            const deptData = await db.getAllDepartments();
-            setDepartments(deptData);
+            // Fetch unique departments from students
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+            const res = await fetch(`${API_URL}/users?role=student`);
+            if (res.ok) {
+                const students = await res.json();
+                const uniqueDepts = [...new Set(students.map((s: any) => s.department).filter(Boolean))] as string[];
+                setDepartments(uniqueDepts.sort());
+            }
         } catch (e) {
             console.error(e);
             toast({ title: "Error fetching data", variant: "destructive" });
@@ -166,7 +172,8 @@ const ExamRestrictions = () => {
     };
 
     const getDeptName = (id: string) => {
-        return departments.find(d => String(d._id) === id || String(d.id) === id)?.name || id;
+        // Since departments are now plain strings (e.g. 'CSE'), just return the value
+        return departments.includes(id) ? id : id;
     };
 
     return (
@@ -223,8 +230,8 @@ const ExamRestrictions = () => {
                                                         onChange={e => handleDeptChange(setIndex, deptIndex, e.target.value)}
                                                     >
                                                         <option value="">Select Department {deptIndex + 1}</option>
-                                                        {departments.map(d => (
-                                                            <option key={d._id || d.id} value={String(d._id || d.id)}>{d.name}</option>
+                                                        {departments.map(dept => (
+                                                            <option key={dept} value={dept}>{dept}</option>
                                                         ))}
                                                     </select>
                                                     <Button

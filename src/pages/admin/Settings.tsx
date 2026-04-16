@@ -14,7 +14,9 @@ const Settings = () => {
         institutionAffiliation: '',
         examCellName: '',
         academicYear: '',
-        examName: ''
+        examName: '',
+        leftLogo: '',
+        rightLogo: ''
     });
 
     useEffect(() => {
@@ -32,7 +34,9 @@ const Settings = () => {
                     institutionAffiliation: data.institutionAffiliation || '',
                     examCellName: data.examCellName || '',
                     academicYear: data.academicYear || '',
-                    examName: data.examName || ''
+                    examName: data.examName || '',
+                    leftLogo: data.leftLogo || '',
+                    rightLogo: data.rightLogo || ''
                 });
             }
         } catch (error) {
@@ -47,6 +51,20 @@ const Settings = () => {
             ...prev,
             [e.target.name]: e.target.value
         }));
+    };
+
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, side: 'left' | 'right') => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setSettings(prev => ({
+                    ...prev,
+                    [side === 'left' ? 'leftLogo' : 'rightLogo']: reader.result as string
+                }));
+            };
+            reader.readAsDataURL(file);
+        }
     };
 
     const handleSave = async (e: React.FormEvent) => {
@@ -158,6 +176,38 @@ const Settings = () => {
                                 onChange={handleChange}
                                 placeholder="e.g. INTERNAL ASSESSMENT TEST – II (Except I Year)"
                             />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="leftLogo">Left Logo (Optional)</Label>
+                                <Input
+                                    id="leftLogo"
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => handleImageUpload(e, 'left')}
+                                />
+                                {settings.leftLogo && (
+                                    <div className="mt-2">
+                                        <img src={settings.leftLogo} alt="Left Logo" className="h-16 object-contain" />
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="rightLogo">Right Logo (Optional)</Label>
+                                <Input
+                                    id="rightLogo"
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => handleImageUpload(e, 'right')}
+                                />
+                                {settings.rightLogo && (
+                                    <div className="mt-2">
+                                        <img src={settings.rightLogo} alt="Right Logo" className="h-16 object-contain" />
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="pt-4">

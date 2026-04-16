@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { db, Hall, Department, SeatAssignment, User } from "@/lib/db";
+import { db, Hall, SeatAssignment, User } from "@/lib/db";
 import { toast } from "@/components/ui/use-toast";
 import { useExam } from "@/context/ExamContext";
 import exportTableAsDoc from "@/lib/exportWord";
@@ -47,7 +47,6 @@ interface StudentSeat {
 
 const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) => {
   const [hall, setHall] = useState<Hall | null>(null);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [seats, setSeats] = useState<StudentSeat[][]>([]);
   const [seatAssignments, setSeatAssignments] = useState<SeatAssignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,17 +93,13 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
 
       if (grid[r] && grid[r][c]) {
-        // Find department name for display
-        const match = departments.find(d => String(d._id || d.id) === String(a.departmentId));
-        const finalDeptId = match ? (match._id || match.id) : a.departmentId;
-
         grid[r][c] = {
           row: a.row,
           column: a.column,
           benchPosition: a.benchPosition,
           rollNumber: a.studentRollNumber,
-          departmentId: finalDeptId,
-          departmentName: match?.name,
+          departmentId: a.departmentId,
+          departmentName: String(a.departmentId || ""),
         };
       }
     });
@@ -136,8 +131,9 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         setExamSession(hallData.examSession || "FN");
         setExamTime(hallData.examTime || "");
 
-        const departmentsData = await db.getAllDepartments();
-        setDepartments(departmentsData);
+        // Fetch Faculty List
+        const facultyList = await db.getAllFaculty();
+        setAllFaculty(facultyList);
 
         // Fetch settings
         const settingsRes = await fetch('http://localhost:5000/api/settings');
@@ -145,10 +141,6 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
         }
-
-        // Fetch Faculty List
-        const facultyList = await db.getAllFaculty();
-        setAllFaculty(facultyList);
 
       } catch (error) {
         console.error("Error fetching hall details:", error);
@@ -408,7 +400,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
       const meta = getExportMetadata();
 
       Object.keys(deptGroups).forEach((deptIdStr) => {
-        const dept = departments.find(d => String(d._id || d.id) === deptIdStr);
+        const deptName = String(deptIdStr);
 
         const rollNumbers = deptGroups[deptIdStr].sort((a, b) => {
           const numA = parseInt(a.replace(/\D/g, ''));
@@ -434,7 +426,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           }
 
           tableData.push([
-            dept?.name || "Unknown",
+            deptName || deptIdStr,
             String(fromRoll),
             String(toRoll),
             String(count),
@@ -574,7 +566,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
       let totalCount = 0;
 
       Object.keys(deptGroups).forEach((deptIdStr) => {
-        const dept = departments.find(d => String(d._id || d.id) === deptIdStr);
+        const deptName = String(deptIdStr);
         const rollNumbers = deptGroups[deptIdStr].sort((a, b) => parseInt(a) - parseInt(b));
 
         if (rollNumbers.length > 0) {
@@ -584,7 +576,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           totalCount += count;
 
           summaryData.push([
-            dept?.name || (deptId === 0 ? "Manual Entry" : "Unknown"),
+            deptName || deptIdStr,
             fromRoll,
             toRoll,
             count.toString(),
@@ -772,7 +764,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           hall,
           seats,
           seatAssignments,
-          departments,
+          departments: [],
           examDate: meta.date,
           examSession: meta.session,
           examTime: meta.time,

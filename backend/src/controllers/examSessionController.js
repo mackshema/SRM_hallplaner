@@ -19,8 +19,6 @@ export const getExamSessions = async (req, res) => {
 /* ===============================
    CREATE NEW EXAM SESSION
 ================================ */
-import Department from "../models/Department.js";
-
 export const createExamSession = async (req, res) => {
     try {
         const { examDate, examSession, examTime } = req.body;
@@ -31,10 +29,9 @@ export const createExamSession = async (req, res) => {
             return res.status(400).json({ error: "An exam session already exists for this date and time." });
         }
 
-        // Initialize with ALL currently available halls and departments
+        // Initialize with ALL currently available halls
         // This makes the transition seamless - new sessions start with everything active.
         const allHalls = await Hall.find({}, '_id');
-        const allDepartments = await Department.find({}, '_id');
 
         const newSession = await ExamSession.create({
             examDate,
@@ -42,7 +39,7 @@ export const createExamSession = async (req, res) => {
             examTime,
             status: "DRAFT",
             activeHalls: allHalls.map(h => h._id),
-            activeDepartments: allDepartments.map(d => d._id)
+            activeDepartments: [] // Departments are dynamically set by timetable now
         });
 
         res.json(newSession);

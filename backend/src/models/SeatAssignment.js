@@ -17,8 +17,7 @@ const seatAssignmentSchema = new mongoose.Schema(
     benchPosition: Number,
     studentRollNumber: String,
     departmentId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Department",
+      type: String,
     },
     isExtraBench: { type: Boolean, default: false }, // 🔥 NEW FLAG
 

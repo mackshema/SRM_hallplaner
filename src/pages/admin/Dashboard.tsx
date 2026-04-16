@@ -58,14 +58,7 @@ const AdminDashboard = () => {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild>
-                  <Link to="/admin/departments">
-                    <Building2 className="h-4 w-4" />
-                    <span>Departments</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
                   <Link to="/admin/seating-plans">

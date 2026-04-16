@@ -68,7 +68,7 @@ export const getStudentExamDetails = async (req, res) => {
  */
 export const createStudentAccount = async (req, res) => {
     try {
-        const { name, rollNumber, email, password, degree, department } = req.body;
+        const { name, rollNumber, email, password, program, degree, department } = req.body;
 
         if (!name || !rollNumber || !password) {
             return res.status(400).json({ message: "Name, roll number, and password are required" });
@@ -90,6 +90,7 @@ export const createStudentAccount = async (req, res) => {
             password: hashedPassword,
             email: email || "",
             role: "student",
+            program,
             degree,
             department
         });
@@ -178,7 +179,7 @@ export const getAllStudents = async (req, res) => {
 export const updateStudentAccount = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, rollNumber, email, skipEmail, degree, department } = req.body;
+        const { name, rollNumber, email, skipEmail, program, degree, department } = req.body;
 
         const student = await User.findById(id);
         if (!student || student.role !== "student") {
@@ -188,6 +189,7 @@ export const updateStudentAccount = async (req, res) => {
         student.name = name || student.name;
         student.username = rollNumber || student.username;
         student.email = email !== undefined ? email : student.email;
+        if (program !== undefined) student.program = program;
         if (degree !== undefined) student.degree = degree;
         if (department !== undefined) student.department = department;
 
@@ -246,6 +248,7 @@ export const bulkCreateStudents = async (req, res) => {
                     password: hashedPassword,
                     email: input.email || "",
                     role: "student",
+                    program: input.program,
                     degree: input.degree,
                     department: input.department
                 });

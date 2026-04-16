@@ -18,33 +18,42 @@ import {
 import { toast } from "@/components/ui/use-toast";
 import * as XLSX from "xlsx";
 import { Checkbox } from "@/components/ui/checkbox";
+import ExcelUploadHelper from "@/components/ExcelUploadHelper";
 
 interface Student {
     _id: string;
     name: string;
     username: string; // Roll number
     email?: string;
-    degree?: string;
+    program?: string;
+    degree?: string; // Corresponds to Level/Year
     department?: string;
 }
 
 interface AcademicStructure {
-    [degreeName: string]: string[];
+    [programName: string]: {
+        [yearName: string]: string[];
+    };
 }
 
 const defaultStructure: AcademicStructure = {
-    "Year 1": [],
-    "Year 2": [],
-    "Year 3": [],
-    "Year 4": [],
-    "MBA": []
+    "Engineering": {
+        "Year 1": [],
+        "Year 2": [],
+        "Year 3": [],
+        "Year 4": []
+    },
+    "MBA": {
+        "Year 1": [],
+        "Year 2": []
+    }
 };
 
 const StudentsManagement = () => {
     // Structure State
     const [structure, setStructure] = useState<AcademicStructure>(() => {
         try {
-            const saved = localStorage.getItem("academicStructure");
+            const saved = localStorage.getItem("academicStructure_v2");
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (typeof parsed === 'object' && parsed !== null) {
@@ -58,6 +67,7 @@ const StudentsManagement = () => {
     });
 
     // Navigation State
+    const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
     const [selectedDegree, setSelectedDegree] = useState<string | null>(null);
     const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
 
@@ -69,7 +79,7 @@ const StudentsManagement = () => {
     
     useEffect(() => {
         setSelectedStudents([]);
-    }, [selectedDegree, selectedDepartment]);
+    }, [selectedProgram, selectedDegree, selectedDepartment]);
     
     // Add/Edit Student Modal
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -84,6 +94,8 @@ const StudentsManagement = () => {
     const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
 
     // Structure Modals
+    const [isAddProgramModalOpen, setIsAddProgramModalOpen] = useState(false);
+    const [newProgramName, setNewProgramName] = useState("");
     const [isAddDegreeModalOpen, setIsAddDegreeModalOpen] = useState(false);
     const [newDegreeName, setNewDegreeName] = useState("");
     const [isAddDeptModalOpen, setIsAddDeptModalOpen] = useState(false);
@@ -96,7 +108,7 @@ const StudentsManagement = () => {
     const [isUploadResultOpen, setIsUploadResultOpen] = useState(false);
 
     useEffect(() => {
-        localStorage.setItem("academicStructure", JSON.stringify(structure));
+        localStorage.setItem("academicStructure_v2", JSON.stringify(structure));
     }, [structure]);
 
     const fetchStudents = async () => {
@@ -119,40 +131,78 @@ const StudentsManagement = () => {
     }, []);
 
     // --- Structure Handlers ---
-    const handleAddDegree = () => {
-        if (!newDegreeName.trim()) return;
-        if (structure[newDegreeName]) {
-            toast({ title: "Error", description: "Degree already exists", variant: "destructive" });
+    const handleAddProgram = () => {
+        if (!newProgramName.trim()) return;
+        if (structure[newProgramName]) {
+            toast({ title: "Error", description: "Program already exists", variant: "destructive" });
             return;
         }
-        setStructure(prev => ({ ...prev, [newDegreeName]: [] }));
+        setStructure(prev => ({ ...prev, [newProgramName]: {} }));
+        setNewProgramName("");
+        setIsAddProgramModalOpen(false);
+        toast({ title: "Success", description: "Program added successfully" });
+    };
+
+    const handleAddDegree = () => {
+        if (!newDegreeName.trim() || !selectedProgram) return;
+        if (structure[selectedProgram][newDegreeName]) {
+            toast({ title: "Error", description: "Category/Year already exists", variant: "destructive" });
+            return;
+        }
+        setStructure(prev => ({ 
+            ...prev, 
+            [selectedProgram]: {
+                ...prev[selectedProgram],
+                [newDegreeName]: []
+            }
+        }));
         setNewDegreeName("");
         setIsAddDegreeModalOpen(false);
-        toast({ title: "Success", description: "Degree category added successfully" });
+        toast({ title: "Success", description: "Category added successfully" });
     };
 
     const handleAddDepartment = () => {
-        if (!newDeptName.trim() || !selectedDegree) return;
-        const currentDepts = structure[selectedDegree];
+        if (!newDeptName.trim() || !selectedProgram || !selectedDegree) return;
+        const currentDepts = structure[selectedProgram][selectedDegree];
         if (currentDepts.includes(newDeptName)) {
             toast({ title: "Error", description: "Department already exists", variant: "destructive" });
             return;
         }
         setStructure(prev => ({
             ...prev,
-            [selectedDegree]: [...currentDepts, newDeptName]
+            [selectedProgram]: {
+                ...prev[selectedProgram],
+                [selectedDegree]: [...currentDepts, newDeptName]
+            }
         }));
         setNewDeptName("");
         setIsAddDeptModalOpen(false);
         toast({ title: "Success", description: "Department added successfully" });
     };
 
-    const handleDeleteDegree = (e: React.MouseEvent, degree: string) => {
+    const handleDeleteProgram = (e: React.MouseEvent, program: string) => {
         e.stopPropagation();
-        if (window.confirm(`Are you sure you want to remove the category "${degree}"? Students in this category will not be deleted, but they won't be visible here until the category is added again.`)) {
+        if (window.confirm(`Are you sure you want to remove the program "${program}"? Students in this program will not be deleted, but they won't be visible here until the program is added again.`)) {
             setStructure(prev => {
                 const updated = { ...prev };
-                delete updated[degree];
+                delete updated[program];
+                return updated;
+            });
+            if (selectedProgram === program) {
+                setSelectedProgram(null);
+                setSelectedDegree(null);
+                setSelectedDepartment(null);
+            }
+        }
+    };
+
+    const handleDeleteDegree = (e: React.MouseEvent, degree: string) => {
+        e.stopPropagation();
+        if (!selectedProgram) return;
+        if (window.confirm(`Are you sure you want to remove the category "${degree}"? Students won't be deleted.`)) {
+            setStructure(prev => {
+                const updated = { ...prev };
+                delete updated[selectedProgram][degree];
                 return updated;
             });
             if (selectedDegree === degree) setSelectedDegree(null);
@@ -161,11 +211,14 @@ const StudentsManagement = () => {
 
     const handleDeleteDepartment = (e: React.MouseEvent, dept: string) => {
         e.stopPropagation();
-        if (!selectedDegree) return;
+        if (!selectedProgram || !selectedDegree) return;
         if (window.confirm(`Are you sure you want to remove the department "${dept}"? Students will not be deleted.`)) {
             setStructure(prev => ({
                 ...prev,
-                [selectedDegree]: (prev[selectedDegree] || []).filter(d => d !== dept)
+                [selectedProgram]: {
+                    ...prev[selectedProgram],
+                    [selectedDegree]: prev[selectedProgram][selectedDegree].filter(d => d !== dept)
+                }
             }));
             if (selectedDepartment === dept) setSelectedDepartment(null);
         }
@@ -212,6 +265,7 @@ const StudentsManagement = () => {
                     body: JSON.stringify({ 
                         ...formData, 
                         skipEmail,
+                        program: selectedProgram,
                         degree: selectedDegree,
                         department: selectedDepartment
                     })
@@ -226,8 +280,7 @@ const StudentsManagement = () => {
                     toast({ title: "Error", description: err.message || "Failed to update.", variant: "destructive" });
                 }
             } else {
-                const generatePassword = () => Math.random().toString(36).slice(-6) + "A1!";
-                const password = generatePassword(); 
+                const password = "student123"; 
                 
                 const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/create-account`, {
                     method: "POST",
@@ -235,6 +288,7 @@ const StudentsManagement = () => {
                     body: JSON.stringify({ 
                         ...formData, 
                         password,
+                        program: selectedProgram,
                         degree: selectedDegree,
                         department: selectedDepartment
                     })
@@ -324,12 +378,12 @@ const StudentsManagement = () => {
             const ws = wb.Sheets[wsname];
             const data = XLSX.utils.sheet_to_json(ws);
             
-            const generatePassword = () => Math.random().toString(36).slice(-6) + "A1!";
             const formattedStudents = data.map((row: any) => ({
                 name: row["Name"] || row["name"],
                 rollNumber: String(row["Roll Number"] || row["rollNumber"] || row["RollNumber"] || ""),
                 email: row["Email"] || row["email"] || "",
-                password: generatePassword(),
+                password: "student123",
+                program: selectedProgram,
                 degree: selectedDegree,
                 department: selectedDepartment
             })).filter(s => s.name && s.rollNumber);
@@ -382,6 +436,7 @@ const StudentsManagement = () => {
     };
 
     const filteredStudents = students.filter(student => 
+        student.program === selectedProgram &&
         student.degree === selectedDegree && 
         student.department === selectedDepartment &&
         ((student.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -393,16 +448,27 @@ const StudentsManagement = () => {
     const breadcrumbs = (
         <div className="flex items-center space-x-2 text-sm text-slate-500 mb-6 font-medium">
             <span 
-                className={`cursor-pointer hover:text-primary transition-colors ${!selectedDegree ? 'text-primary' : ''}`}
-                onClick={() => { setSelectedDegree(null); setSelectedDepartment(null); }}
+                className={`cursor-pointer hover:text-primary transition-colors ${!selectedProgram ? 'text-primary' : ''}`}
+                onClick={() => { setSelectedProgram(null); setSelectedDegree(null); setSelectedDepartment(null); }}
             >
-                Categories
+                Programs
             </span>
+            {selectedProgram && (
+                <>
+                    <ChevronRight className="h-4 w-4" />
+                    <span 
+                        className={`cursor-pointer hover:text-primary transition-colors ${!selectedDegree && selectedProgram ? 'text-primary' : ''}`}
+                        onClick={() => { setSelectedDegree(null); setSelectedDepartment(null); }}
+                    >
+                        {selectedProgram}
+                    </span>
+                </>
+            )}
             {selectedDegree && (
                 <>
                     <ChevronRight className="h-4 w-4" />
                     <span 
-                        className={`cursor-pointer hover:text-primary transition-colors ${!selectedDepartment ? 'text-primary' : ''}`}
+                        className={`cursor-pointer hover:text-primary transition-colors ${!selectedDepartment && selectedDegree ? 'text-primary' : ''}`}
                         onClick={() => setSelectedDepartment(null)}
                     >
                         {selectedDegree}
@@ -459,31 +525,31 @@ const StudentsManagement = () => {
 
             {breadcrumbs}
 
-            {/* Level 0: Degrees / Categories */}
-            {!selectedDegree && (
+            {/* Level 0: Programs */}
+            {!selectedProgram && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
                             <LayoutGrid className="h-5 w-5 text-slate-400" />
-                            Academic Categories
+                            Academic Programs
                         </h2>
-                        <Button onClick={() => setIsAddDegreeModalOpen(true)} variant="outline" size="sm">
-                            <Plus className="h-4 w-4 mr-2" /> Add Category
+                        <Button onClick={() => setIsAddProgramModalOpen(true)} variant="outline" size="sm">
+                            <Plus className="h-4 w-4 mr-2" /> Add Program
                         </Button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                        {Object.keys(structure).map((degree) => (
+                        {Object.keys(structure).map((program) => (
                             <Card 
-                                key={degree} 
+                                key={program} 
                                 className="cursor-pointer hover:border-primary hover:shadow-md transition-all group duration-300"
-                                onClick={() => setSelectedDegree(degree)}
+                                onClick={() => setSelectedProgram(program)}
                             >
                                 <CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-3 relative">
                                     <Button 
                                         variant="ghost" 
                                         size="icon" 
                                         className="absolute top-2 right-2 h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        onClick={(e) => handleDeleteDegree(e, degree)}
+                                        onClick={(e) => handleDeleteProgram(e, program)}
                                     >
                                         <Trash2 className="h-4 w-4" />
                                     </Button>
@@ -491,8 +557,8 @@ const StudentsManagement = () => {
                                         <GraduationCap className="h-8 w-8 text-slate-400 group-hover:text-primary transition-colors" />
                                     </div>
                                     <div>
-                                        <h3 className="font-semibold text-lg text-slate-800">{degree}</h3>
-                                        <p className="text-sm text-slate-500">{(structure[degree] || []).length} Departments</p>
+                                        <h3 className="font-semibold text-lg text-slate-800">{program}</h3>
+                                        <p className="text-sm text-slate-500">{Object.keys(structure[program]).length} Categories</p>
                                     </div>
                                 </CardContent>
                             </Card>
@@ -501,8 +567,67 @@ const StudentsManagement = () => {
                 </div>
             )}
 
-            {/* Level 1: Departments */}
-            {selectedDegree && !selectedDepartment && (
+            {/* Level 1: Degrees/Years */}
+            {selectedProgram && !selectedDegree && (
+                <div className="animate-in fade-in slide-in-from-right-8 duration-500">
+                    <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-3">
+                            <Button variant="ghost" size="icon" onClick={() => setSelectedProgram(null)}>
+                                <ArrowLeft className="h-4 w-4" />
+                            </Button>
+                            <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+                                <LayoutGrid className="h-5 w-5 text-slate-400" />
+                                Categories for {selectedProgram}
+                            </h2>
+                        </div>
+                        <Button onClick={() => setIsAddDegreeModalOpen(true)} variant="outline" size="sm">
+                            <Plus className="h-4 w-4 mr-2" /> Add Category
+                        </Button>
+                    </div>
+                    
+                    {Object.keys(structure[selectedProgram] || {}).length === 0 ? (
+                         <div className="text-center py-16 bg-white rounded-xl border border-dashed border-slate-300">
+                             <GraduationCap className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                             <h3 className="text-lg font-medium text-slate-800">No Categories Found</h3>
+                             <p className="text-slate-500 mb-4">Start by adding a year/category for {selectedProgram}</p>
+                             <Button onClick={() => setIsAddDegreeModalOpen(true)}>
+                                 <Plus className="h-4 w-4 mr-2" /> Add Category
+                             </Button>
+                         </div>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                            {Object.keys(structure[selectedProgram]).map((degree) => (
+                                <Card 
+                                    key={degree} 
+                                    className="cursor-pointer hover:border-primary hover:shadow-md transition-all group duration-300"
+                                    onClick={() => setSelectedDegree(degree)}
+                                >
+                                    <CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-3 relative">
+                                        <Button 
+                                            variant="ghost" 
+                                            size="icon" 
+                                            className="absolute top-2 right-2 h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => handleDeleteDegree(e, degree)}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                        <div className="p-4 bg-slate-50 rounded-full group-hover:bg-primary/10 transition-colors">
+                                            <Folder className="h-8 w-8 text-slate-400 group-hover:text-primary transition-colors" />
+                                        </div>
+                                        <div>
+                                            <h3 className="font-semibold text-lg text-slate-800">{degree}</h3>
+                                            <p className="text-sm text-slate-500">{(structure[selectedProgram][degree] || []).length} Departments</p>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Level 2: Departments */}
+            {selectedProgram && selectedDegree && !selectedDepartment && (
                 <div className="animate-in fade-in slide-in-from-right-8 duration-500">
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-3">
@@ -519,7 +644,7 @@ const StudentsManagement = () => {
                         </Button>
                     </div>
                     
-                    {(structure[selectedDegree] || []).length === 0 ? (
+                    {(structure[selectedProgram]?.[selectedDegree] || []).length === 0 ? (
                         <div className="text-center py-16 bg-white rounded-xl border border-dashed border-slate-300">
                             <Folder className="h-12 w-12 text-slate-300 mx-auto mb-3" />
                             <h3 className="text-lg font-medium text-slate-800">No Departments Found</h3>
@@ -530,8 +655,8 @@ const StudentsManagement = () => {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                            {(structure[selectedDegree] || []).map((dept) => {
-                                const deptStudents = students.filter(s => s.degree === selectedDegree && s.department === dept);
+                            {(structure[selectedProgram][selectedDegree] || []).map((dept) => {
+                                const deptStudents = students.filter(s => s.program === selectedProgram && s.degree === selectedDegree && s.department === dept);
                                 return (
                                     <Card 
                                         key={dept} 
@@ -560,8 +685,8 @@ const StudentsManagement = () => {
                 </div>
             )}
 
-            {/* Level 2: Students List */}
-            {selectedDegree && selectedDepartment && (
+            {/* Level 3: Students List */}
+            {selectedProgram && selectedDegree && selectedDepartment && (
                 <div className="animate-in fade-in slide-in-from-right-8 duration-500">
                     <Card className="border-none shadow-sm shadow-slate-200/50">
                         <CardHeader className="pb-4 border-b border-slate-100 flex flex-row items-center justify-between">
@@ -571,7 +696,7 @@ const StudentsManagement = () => {
                                 </Button>
                                 <div>
                                     <CardTitle>{selectedDepartment} Students</CardTitle>
-                                    <CardDescription>Manage students in {selectedDegree} &gt; {selectedDepartment}</CardDescription>
+                                    <CardDescription>Manage students in {selectedProgram} &gt; {selectedDegree} &gt; {selectedDepartment}</CardDescription>
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
@@ -591,7 +716,19 @@ const StudentsManagement = () => {
                                 </div>
                             </div>
                         </CardHeader>
-                        <CardContent className="pt-4">
+                        <CardContent className="pt-4 space-y-4">
+                            <ExcelUploadHelper
+                                columns={[
+                                    { header: "Name",        example: "Chaitanya Kumar",  required: true,  description: "Student full name" },
+                                    { header: "Roll Number", example: "911123149001",      required: true,  description: "Used as login username" },
+                                    { header: "Email",       example: "student@srm.edu",  required: false, description: "Optional" },
+                                ]}
+                                templateFilename="Student_Upload_Template.xlsx"
+                                sampleRows={[
+                                    { "Name": "Priya Sharma", "Roll Number": "911123149002", "Email": "priya@srm.edu" },
+                                ]}
+                                note="Department, Year & Program are taken from the current navigation context — no need to add them in the file."
+                            />
                             <div className="rounded-md border border-slate-200 overflow-hidden">
                                 <Table>
                                     <TableHeader className="bg-slate-50">
@@ -658,18 +795,40 @@ const StudentsManagement = () => {
             )}
 
             {/* Structure Modals */}
+            <Dialog open={isAddProgramModalOpen} onOpenChange={setIsAddProgramModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Add Academic Program</DialogTitle>
+                        <DialogDescription>Create a new program category (e.g., Engineering, MBA, Arts)</DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 text-left space-y-2">
+                        <Label>Program Name</Label>
+                        <Input 
+                            value={newProgramName} 
+                            onChange={(e) => setNewProgramName(e.target.value)} 
+                            placeholder="e.g., Engineering" 
+                            autoFocus
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAddProgramModalOpen(false)}>Cancel</Button>
+                        <Button onClick={handleAddProgram}>Add Program</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={isAddDegreeModalOpen} onOpenChange={setIsAddDegreeModalOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Add Academic Category</DialogTitle>
-                        <DialogDescription>Create a new degree or year category (e.g., Year 1, Year 2, MBA, M.E, etc.)</DialogDescription>
+                        <DialogTitle>Add Category / Year</DialogTitle>
+                        <DialogDescription>Create a new category under {selectedProgram} (e.g., Year 1, Year 2)</DialogDescription>
                     </DialogHeader>
                     <div className="py-4 text-left space-y-2">
-                        <Label>Category/Degree Name</Label>
+                        <Label>Category/Year Name</Label>
                         <Input 
                             value={newDegreeName} 
                             onChange={(e) => setNewDegreeName(e.target.value)} 
-                            placeholder="e.g., M.Tech" 
+                            placeholder="e.g., First Year" 
                             autoFocus
                         />
                     </div>
@@ -684,7 +843,7 @@ const StudentsManagement = () => {
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Add Department</DialogTitle>
-                        <DialogDescription>Add a new department under {selectedDegree}</DialogDescription>
+                        <DialogDescription>Add a new department under {selectedProgram} - {selectedDegree}</DialogDescription>
                     </DialogHeader>
                     <div className="py-4 text-left space-y-2">
                         <Label>Department Name</Label>

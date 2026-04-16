@@ -9,8 +9,7 @@ const seatingAssignmentSchema = new mongoose.Schema(
     },
 
     department: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Department",
+      type: String,
       required: true,
     },
 

@@ -12,7 +12,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { db, Hall, Department, ExamSession } from "@/lib/db";
+
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CheckCircle2, View, Eye, EyeOff, X } from "lucide-react";
+
+import { db, Hall, ExamSession } from "@/lib/db";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -32,14 +37,16 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Shuffle, FileDown, Plus, Lock, Calendar, Clock, Edit, Trash2 } from "lucide-react";
+import { Shuffle, FileDown, Plus, Lock, Unlock, Calendar, Clock, Edit, Trash2 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { HeaderSettings } from "@/lib/exportBenchLayoutWord";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // Assuming these exist, else standard select
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import ExcelUploadHelper from "@/components/ExcelUploadHelper";
 
 const SeatingPlans = () => {
+
   const [settings, setSettings] = useState<HeaderSettings>({
     institutionName: "",
     institutionSubtitle: "",
@@ -49,18 +56,87 @@ const SeatingPlans = () => {
     examName: ""
   });
   const [halls, setHalls] = useState<Hall[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+
   const [generating, setGenerating] = useState(false);
 
-  // SESSION MANAGEMENT
+  const [timetableFile, setTimetableFile] = useState<File | null>(null);
+  const [lastUploadedName, setLastUploadedName] = useState(localStorage.getItem('internal_timetable_filename') || null);
   const [examSessions, setExamSessions] = useState<ExamSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
-  const [showCreateSessionDialog, setShowCreateSessionDialog] = useState(false);
-  const [newSessionData, setNewSessionData] = useState({
-    examDate: "",
-    examSession: "FN" as "FN" | "AN",
-    examTime: "09:30 AM"
-  });
+  const [selectedSessionAssignments, setSelectedSessionAssignments] = useState<any[]>([]);
+
+  const fetchSeatingPlan = async (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    const assignments = await db.getAllSeatAssignments(sessionId);
+    setSelectedSessionAssignments(assignments);
+  };
+
+  const groupedSeating = React.useMemo(() => {
+    if (!selectedSessionAssignments || selectedSessionAssignments.length === 0) return [];
+    const groups: any = {};
+    selectedSessionAssignments.forEach((a: any) => {
+      const hall = halls.find(h => h._id === a.hallId);
+      const hallName = hall ? hall.name : a.hallId;
+      const key = `${a.hallId}_${a.departmentId}`;
+      if (!groups[key]) {
+        groups[key] = {
+          hallName: hallName,
+          department: a.departmentId,
+          rollNumbers: []
+        };
+      }
+      if (a.studentRollNumber) groups[key].rollNumbers.push(a.studentRollNumber);
+    });
+
+    const formatRolls = (rolls: any[]) => {
+      if (!rolls.length) return "None";
+      const sorted = [...rolls].sort((a, b) => {
+        const strA = String(a || "");
+        const strB = String(b || "");
+        const numA = parseInt(strA.replace(/\D/g, ''));
+        const numB = parseInt(strB.replace(/\D/g, ''));
+        if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+        return strA.localeCompare(strB);
+      });
+      const ranges: string[] = [];
+      let start = String(sorted[0]), end = String(sorted[0]);
+      const getNum = (s: string) => parseInt(String(s).replace(/\D/g, ''));
+      const getPref = (s: string) => String(s).replace(/\d/g, '');
+
+      for (let i = 1; i < sorted.length; i++) {
+        const curr = String(sorted[i]);
+        if (getPref(curr) === getPref(end) && getNum(curr) === getNum(end) + 1) {
+          end = curr;
+        } else {
+          ranges.push(start === end ? start : `${start} - ${end}`);
+          start = curr; end = curr;
+        }
+      }
+      ranges.push(start === end ? start : `${start} - ${end}`);
+      return ranges.join(", ");
+    };
+
+    return Object.values(groups).map((g: any) => ({
+      ...g,
+      count: g.rollNumbers.length,
+      formatted: formatRolls(g.rollNumbers)
+    })).sort((a: any, b: any) => String(a.hallName || '').localeCompare(String(b.hallName || '')));
+  }, [selectedSessionAssignments, halls]);
+
+  // Derive the list of halls that actually have students in the current session
+  const occupiedHalls = React.useMemo(() => {
+    if (!selectedSessionAssignments || selectedSessionAssignments.length === 0) return [];
+    const hallStudentCount: Record<string, number> = {};
+    selectedSessionAssignments.forEach((a: any) => {
+      if (!hallStudentCount[a.hallId]) hallStudentCount[a.hallId] = 0;
+      hallStudentCount[a.hallId]++;
+    });
+    return halls
+      .filter(h => hallStudentCount[h._id] > 0)
+      .map(h => ({ hall: h, studentCount: hallStudentCount[h._id] }))
+      .sort((a, b) => String(a.hall.name).localeCompare(String(b.hall.name)));
+  }, [selectedSessionAssignments, halls]);
+
   const [creatingSession, setCreatingSession] = useState(false);
 
   const [showEditSessionDialog, setShowEditSessionDialog] = useState(false);
@@ -90,8 +166,7 @@ const SeatingPlans = () => {
         const hallsData = await db.getAllHalls();
         setHalls(hallsData);
 
-        const deptsData = await db.getAllDepartments();
-        setDepartments(deptsData);
+
 
         // Fetch Exam Sessions
         const sessionsData = await db.getExamSessions();
@@ -117,24 +192,25 @@ const SeatingPlans = () => {
     fetchData();
   }, []);
 
-  const handleCreateSession = async () => {
-    if (!newSessionData.examDate || !newSessionData.examTime) {
-      toast({ title: "Error", description: "Please fill all fields", variant: "destructive" });
-      return;
-    }
-    setCreatingSession(true);
+  const handleUploadTimetable = async () => {
+    if (!timetableFile) return;
+    const formData = new FormData();
+    formData.append("file", timetableFile);
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
     try {
-      const session = await db.createExamSession(newSessionData);
-      setExamSessions(prev => [...prev, session]);
-      setSelectedSessionId(session._id);
-      setShowCreateSessionDialog(false);
-      toast({ title: "Success", description: "New exam session created" });
-      // Reset form
-      setNewSessionData({ examDate: "", examSession: "FN", examTime: "09:30 AM" });
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    } finally {
-      setCreatingSession(false);
+      const res = await fetch(`${API_URL}/internal-timetable/upload-timetable`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success) {
+         toast({ title: "Success", description: `Updated mapping for ${data.updatedSubjects} subjects.` });
+         setLastUploadedName(timetableFile.name);
+         localStorage.setItem('internal_timetable_filename', timetableFile.name);
+         setTimetableFile(null);
+      } else toast({ title: "Error", description: data.error, variant: "destructive" });
+    } catch(e) {
+      toast({ title: "Error", description: "Failed to upload", variant: "destructive" });
     }
   };
 
@@ -234,59 +310,37 @@ const SeatingPlans = () => {
   const [facultySuggestions, setFacultySuggestions] = useState<any[]>([]);
   const [tempDemandFacultyIds, setTempDemandFacultyIds] = useState<string[]>([]);
 
-  const handleGenerateAllSeatingPlans = async (demandOverride: string[] = []) => {
-    if (!selectedSessionId) {
-      toast({ title: "Error", description: "No exam session selected", variant: "destructive" });
-      return;
-    }
-
+  const handleBulkTimetableGeneration = async () => {
     setGenerating(true);
     try {
-      const result = await db.generateAllSeatingPlans(
-        selectedSessionId,
-        skipRollNumbers,
-        manualRollNumbers,
-        demandOverride
-      );
-
-      if (result.success) {
-        if (result.unallocated && result.unallocated.length > 0) {
-          setUnallocatedStudents(result.unallocated);
-          setShowUnallocatedDialog(true);
-        }
-
-        if (result.allocationResult?.shortage) {
-          toast({
-            title: "Partial Generation",
-            description: "Students allocated, but some halls have faculty shortages.",
-            variant: "default",
-          });
-          setAllocationWarnings(result.allocationResult.warnings);
-          setFacultySuggestions(result.allocationResult.suggestions);
-          setTempDemandFacultyIds(demandOverride);
-          setShowShortageDialog(true);
-        } else {
-          toast({
-            title: "Success",
-            description: "Seating plans and faculty allocated successfully.",
-          });
-          setShowShortageDialog(false);
-        }
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to generate seating plans.",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      console.error(error);
-      const errorMessage = error instanceof Error ? error.message : "Error while generating seating plans.";
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+      const res = await fetch(`${API_URL}/internal-timetable/generate-all-seating`, {
+         method: 'POST'
       });
+      const data = await res.json();
+      if (data.success) {
+         const sessionWord = data.count === 1 ? 'session' : 'sessions';
+         toast({ title: 'Generation Complete', description: `Generated ${data.count} ${sessionWord}.${data.skipped > 0 ? ` Skipped ${data.skipped} existing.` : ''}` });
+
+         // Refresh sessions
+         const sessionsData = await db.getExamSessions();
+         setExamSessions(sessionsData);
+         if (sessionsData.length > 0 && !selectedSessionId) {
+            setSelectedSessionId(sessionsData[sessionsData.length - 1]._id);
+         }
+
+         // Show shortage popup if faculty couldn't be fully allocated
+         if (data.shortage && data.allocationWarnings && data.allocationWarnings.length > 0) {
+           setAllocationWarnings(data.allocationWarnings);
+           setFacultySuggestions(data.facultySuggestions || []);
+           setTempDemandFacultyIds([]);
+           setShowShortageDialog(true);
+         }
+      } else {
+         toast({ title: 'Error', description: data.error, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Generation failed', variant: 'destructive' });
     } finally {
       setGenerating(false);
     }
@@ -294,7 +348,8 @@ const SeatingPlans = () => {
 
   const handleApplyDemand = () => {
     setShowShortageDialog(false);
-    handleGenerateAllSeatingPlans(tempDemandFacultyIds);
+    // TODO: implement apply demand flow in bulk generation if supported by backend
+    handleBulkTimetableGeneration();
   };
 
   const toggleDemandFaculty = (id: string) => {
@@ -387,11 +442,8 @@ const SeatingPlans = () => {
         const deptGroups = hallGroups[hallId];
 
         Object.keys(deptGroups).forEach((deptId) => {
-          // Find department by ID (handle string/number mismatch)
-          const dept = departments.find(d =>
-            String(d.id) === deptId ||
-            String(d._id) === deptId
-          );
+          // String departmentId since we removed models
+          const deptName = deptId;
 
           // Numeric sort for roll numbers
           const rollNumbers = deptGroups[deptId].sort((a, b) => {
@@ -419,7 +471,7 @@ const SeatingPlans = () => {
             }
 
             tableData.push([
-              dept?.name || "Unknown",
+              deptName || "Unknown",
               fromRoll,
               toRoll,
               count.toString(),
@@ -485,257 +537,296 @@ const SeatingPlans = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold">Internal Examination Seating</h1>
-          <p className="text-gray-600">View and manage seating plans for all exam halls</p>
-        </div>
-        <div className="flex gap-2">
-
-          {/* Session Selector */}
-          <div className="flex gap-1 items-center bg-white border rounded-md p-1 shadow-sm">
-            <select
-              className="p-1 min-w-[200px] outline-none bg-transparent"
-              value={selectedSessionId}
-              onChange={(e) => setSelectedSessionId(e.target.value)}
-            >
-              <option value="" disabled>Select Exam Session</option>
-              {examSessions.map(s => (
-                <option key={s._id} value={s._id}>
-                  {s.examDate} ({s.examSession}) - {s.status}
-                </option>
-              ))}
-            </select>
-            {selectedSessionId && selectedSession?.status === "DRAFT" && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                  onClick={() => {
-                    if (selectedSession) {
-                      setEditSessionData({
-                        id: selectedSession._id,
-                        examDate: selectedSession.examDate,
-                        examSession: selectedSession.examSession,
-                        examTime: selectedSession.examTime,
-                      });
-                      setShowEditSessionDialog(true);
-                    }
-                  }}
-                  title="Edit Exam Session"
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                  onClick={() => setShowDeleteSessionDialog(true)}
-                  title="Delete Exam Session"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </>
-            )}
-          </div>
-
-          <Button onClick={() => setShowCreateSessionDialog(true)} variant="secondary">
-            <Plus className="h-4 w-4 mr-1" /> New Exam Date
-          </Button>
-
-          <Button
-            variant="outline"
-            onClick={exportConsolidatedPlan}
-            className="gap-2"
-            disabled={!selectedSessionId}
-          >
-            <FileDown className="h-4 w-4" />
-            Export Consolidated
-          </Button>
-
-          <Button
-            onClick={() => handleGenerateAllSeatingPlans([])}
-            disabled={generating || halls.length === 0 || !selectedSessionId || isFinalized}
-            className="gap-2"
-            variant={isFinalized ? "secondary" : "default"}
-          >
-            {isFinalized ? <Lock className="h-4 w-4" /> : <Shuffle className="h-4 w-4" />}
-            {generating ? "Generating..." : isFinalized ? "Locked (Final)" : "Generate Seating"}
-          </Button>
-        </div>
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold tracking-tight text-primary">Internal Examination Seating</h1>
       </div>
 
-      {selectedSession && (
-        <div className="mb-6 rounded-lg border bg-blue-50 p-4 flex justify-between items-center">
-          <div className="flex gap-6 items-center">
-            <div className="flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-blue-600" />
-              <div>
-                <p className="text-xs text-blue-600 font-semibold uppercase">Exam Date</p>
-                <p className="font-bold">{selectedSession.examDate}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-blue-600" />
-              <div>
-                <p className="text-xs text-blue-600 font-semibold uppercase">Session</p>
-                <p className="font-bold">{selectedSession.examSession} ({selectedSession.examTime})</p>
-              </div>
-            </div>
-            <div>
-              <Badge variant={isFinalized ? "secondary" : "outline"} className={isFinalized ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}>
-                {selectedSession.status}
-              </Badge>
-            </div>
-          </div>
-          <div>
-            {!isFinalized && (
-              <Button
-                size="sm"
-                className="bg-green-600 hover:bg-green-700 text-white"
-                onClick={handleFinalizeSession}
-              >
-                <Lock className="h-3 w-3 mr-2" />
-                Finalize Seating Plan
-              </Button>
-            )}
-            {isFinalized && (
-              <div className="flex gap-2">
-                {!selectedSession.isPublished ? (
-                  <Button
-                    size="sm"
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                    onClick={async () => {
-                      try {
-                        const updated = await db.updateExamSession(selectedSessionId, { isPublished: true });
-                        setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
-                        toast({ title: "Published", description: "Exam plan published to student dashboard." });
-                      } catch (err: any) {
-                        toast({ title: "Error", description: err.message, variant: "destructive" });
-                      }
-                    }}
-                  >
-                    Publish to Student Dashboard
-                  </Button>
+      <Tabs defaultValue="sessions">
+        <TabsList>
+          <TabsTrigger value="sessions">Exam Sessions</TabsTrigger>
+          <TabsTrigger value="setup">Setup & Timetable</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="setup" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row space-y-0 justify-between items-center">
+              <CardTitle>Timetable Feed</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <ExcelUploadHelper
+                columns={[
+                  { header: "Subject Code", example: "CS3401",      required: true, description: "Subject code" },
+                  { header: "Year",         example: "Second Year",  required: true, description: "Student year/batch" },
+                  { header: "Department",   example: "CSE",          required: true, description: "Dept abbreviation" },
+                  { header: "Date",         example: "2025-04-15",   required: true, description: "YYYY-MM-DD" },
+                  { header: "Session",      example: "FN",           required: true, description: "FN or AN" },
+                ]}
+                templateFilename="Internal_Timetable_Template.xlsx"
+                note="Each row = one subject for one dept on one date. Add one row per subject-dept combination."
+              />
+              <div className="flex gap-4 items-center">
+                {timetableFile ? (
+                  <div className="flex items-center gap-2 border rounded-md px-3 py-2 flex-grow bg-slate-50">
+                    <span className="text-sm truncate flex-grow font-medium text-slate-700">{timetableFile.name} (Ready to upload)</span>
+                    <Button variant="ghost" size="icon" onClick={() => setTimetableFile(null)} className="h-6 w-6 text-slate-500 hover:text-red-500">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : lastUploadedName ? (
+                   <div className="flex items-center gap-2 border border-green-200 rounded-md px-3 py-2 flex-grow bg-green-50 justify-between">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      <span className="text-sm truncate font-medium text-green-800">Currently Active: {lastUploadedName}</span>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => { setLastUploadedName(null); localStorage.removeItem('internal_timetable_filename'); }} className="h-6 w-6 text-slate-500 flex-shrink-0">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="border-red-600 text-red-700 hover:bg-red-50"
-                    onClick={async () => {
-                      try {
-                        const updated = await db.updateExamSession(selectedSessionId, { isPublished: false });
-                        setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
-                        toast({ title: "Unpublished", description: "Exam plan hidden from student dashboard." });
-                      } catch (err: any) {
-                        toast({ title: "Error", description: err.message, variant: "destructive" });
-                      }
-                    }}
-                  >
-                    Unpublish
-                  </Button>
+                  <Input type="file" accept=".xlsx, .xls" className="flex-grow" onChange={(e) => setTimetableFile(e.target.files?.[0] || null)} />
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-yellow-600 text-yellow-700 hover:bg-yellow-50"
-                  onClick={async () => {
-                    try {
-                      const updated = await db.unfinalizeExamSession(selectedSessionId);
-                      setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
-                      toast({ title: "Unlocked", description: "Seating plan reverted to DRAFT mode." });
-                    } catch (err: any) {
-                      toast({ title: "Error", description: err.message, variant: "destructive" });
-                    }
-                  }}
-                >
-                  <Lock className="h-3 w-3 mr-2" />
-                  Unlock / Edit Plan
+                <Button onClick={handleUploadTimetable} disabled={!timetableFile}>
+                  Upload Timetable
                 </Button>
               </div>
-            )}
-          </div>
-        </div>
-      )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* ROLL NUMBER MANAGEMENT - ONLY SHOW IF NOT FINALIZED */}
-      {!isFinalized && selectedSession && (
-        <div className="mb-6 rounded-lg border bg-gray-50 p-4">
-          <h3 className="font-semibold mb-3">Roll Number Management (Draft Mode)</h3>
+        <TabsContent value="sessions" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Bulk Exam Generation</CardTitle>
+              <CardDescription>Automatically generate seating plans for internal timetable feed</CardDescription>
+            </CardHeader>
+            <CardContent className="flex gap-4 items-center bg-slate-50/50 py-6">
+              <Button onClick={handleBulkTimetableGeneration} disabled={generating} className="bg-primary text-white text-md shadow-sm">
+                <Plus className="mr-2 h-5 w-5" /> {generating ? "Generating..." : "Generate Exam Plans"}
+              </Button>
+              <span className="text-sm text-slate-500 border-l pl-4 border-slate-300">
+                This will create new specific seating plans based on internal rules.
+              </span>
+            </CardContent>
+          </Card>
 
-          <div className="flex gap-4 items-end flex-wrap mb-4">
-            <div className="flex-1 min-w-[200px]">
-              <Label htmlFor="skipRollNumbers">Skip Roll Numbers (comma separated)</Label>
-              <div className="flex gap-2 mt-1">
-                <Input
-                  id="skipRollNumbers"
-                  placeholder="e.g., 911123149005"
-                  value={skipInput}
-                  onChange={(e) => setSkipInput(e.target.value)}
-                />
-                <Button variant="outline" onClick={handleSkipRollNumbers}>
-                  Add
-                </Button>
-              </div>
+          {!selectedSessionId ? (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold text-slate-800">Available Plans</h2>
+              {examSessions.length === 0 ? (
+                <div className="text-center py-12 text-slate-500 border rounded-xl bg-slate-50">
+                   No seating plans generated yet. Once generated, they will appear here.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {examSessions.map(plan => (
+                     <Card key={plan._id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => fetchSeatingPlan(plan._id)}>
+                       <div className="p-1 w-full bg-primary" />
+                       <CardContent className="p-5">
+                         <div className="flex justify-between items-start mb-4">
+                            <div>
+                               <h3 className="font-bold text-lg flex items-center gap-2">
+                                 <Calendar className="h-4 w-4 text-primary" /> 
+                                 {plan.examDate}
+                               </h3>
+                               <p className="text-sm font-medium text-slate-500">{plan.examSession} Session</p>
+                            </div>
+                            <div className={`px-2 py-1 rounded text-xs font-bold ${plan.status === 'FINAL' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                               {plan.status || 'DRAFT'}
+                            </div>
+                         </div>
+                         <div className="flex items-center justify-between mt-4">
+                           <span className="text-slate-500 text-sm font-medium">Internal Evaluation</span>
+                           <div className="flex items-center gap-1">
+                             <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); setSelectedSessionId(plan._id); setShowDeleteSessionDialog(true); }}>
+                                <Trash2 className="h-4 w-4"/>
+                             </Button>
+                             <Button variant="ghost" size="sm" className="text-primary gap-1">
+                                <View className="h-4 w-4"/> View Focus
+                             </Button>
+                           </div>
+                         </div>
+                       </CardContent>
+                     </Card>
+                  ))}
+                </div>
+              )}
             </div>
+          ) : (
+            <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-300">
+               <div className="flex justify-between items-center bg-white p-4 border rounded-xl shadow-sm">
+                 <div>
+                   <div className="flex items-center gap-3">
+                     <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                       {selectedSession?.examDate} <span className="text-slate-400 font-medium">|</span> {selectedSession?.examSession} Session
+                     </h2>
+                     <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setShowDeleteSessionDialog(true)}>
+                        <Trash2 className="h-4 w-4 mr-1"/> Delete Plan
+                     </Button>
+                   </div>
+                 </div>
+                 <div className="flex gap-2">
+                   <Button variant="outline" onClick={() => setSelectedSessionId("")}>Back to Sessions</Button>
+                   <Button onClick={exportConsolidatedPlan} className="bg-primary text-primary-foreground shadow-sm">
+                     Download Consolidated
+                   </Button>
+                   <Button onClick={() => window.open(`http://localhost:5000/api/export/full-exam/${selectedSessionId}`, '_blank')} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
+                     Download Full Package (Docx + Pdf)
+                   </Button>
+                 </div>
+               </div>
+               <div className="rounded-xl border bg-blue-50/50 p-5 flex flex-wrap justify-between items-center gap-4">
+                  <div className="flex gap-8 items-center">
+                    <div>
+                      <span className="text-xs text-slate-500 font-semibold uppercase block mb-2 tracking-wider">Plan Status</span>
+                      <div className="flex items-center gap-2">
+                         {selectedSession?.status === "FINAL" ? <Lock className="h-4 w-4 text-green-600"/> : <Unlock className="h-4 w-4 text-yellow-600"/>}
+                         <span className={`px-2 py-1 rounded text-sm font-bold ${selectedSession?.status === 'FINAL' ? 'bg-green-200 text-green-800' : 'bg-yellow-200 text-yellow-800'}`}>
+                           {selectedSession?.status || "DRAFT"}
+                         </span>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-500 font-semibold uppercase block mb-2 tracking-wider">Visibility</span>
+                      <div className="flex items-center gap-2">
+                         {selectedSession?.isPublished ? <Eye className="h-4 w-4 text-blue-600"/> : <EyeOff className="h-4 w-4 text-slate-400"/>}
+                         <span className={`px-2 py-1 rounded text-sm font-bold ${selectedSession?.isPublished ? 'bg-blue-200 text-blue-800' : 'bg-slate-200 text-slate-700'}`}>
+                           {selectedSession?.isPublished ? "PUBLISHED" : "HIDDEN"}
+                         </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {selectedSession?.status !== "FINAL" ? (
+                      <Button className="bg-green-600 hover:bg-green-700 text-white shadow-sm" onClick={handleFinalizeSession}>
+                        <CheckCircle2 className="mr-2 h-4 w-4" /> Finalize Plan
+                      </Button>
+                    ) : (
+                      <>
+                        {!selectedSession?.isPublished ? (
+                          <Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm" onClick={async () => {
+                            try {
+                              const updated = await db.updateExamSession(selectedSessionId, { isPublished: true });
+                              setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                              toast({ title: "Published", description: "Plan published." });
+                            } catch (err: any) {
+                              toast({ title: "Error", description: err.message, variant: "destructive" });
+                            }
+                          }}>
+                            Publish to Dashboards
+                          </Button>
+                        ) : (
+                          <Button variant="outline" className="border-red-600 text-red-700 hover:bg-red-50" onClick={async () => {
+                            try {
+                              const updated = await db.updateExamSession(selectedSessionId, { isPublished: false });
+                              setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                              toast({ title: "Unpublished", description: "Plan hidden." });
+                            } catch (err: any) {
+                              toast({ title: "Error", description: err.message, variant: "destructive" });
+                            }
+                          }}>
+                            Unpublish Plan
+                          </Button>
+                        )}
+                        <Button variant="outline" className="border-yellow-600 text-yellow-700 hover:bg-yellow-50" onClick={async () => {
+                          try {
+                            const updated = await db.unfinalizeExamSession(selectedSessionId);
+                            setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                            toast({ title: "Unlocked", description: "Reverted to DRAFT." });
+                          } catch (err: any) {
+                            toast({ title: "Error", description: err.message, variant: "destructive" });
+                          }
+                        }}>
+                          Unlock / Edit Plan
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
 
-            <Button variant="outline" onClick={() => setShowManualAddDialog(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Manual Roll Numbers
-            </Button>
-          </div>
+                <div className="border rounded-md bg-white">
+                  <Tabs defaultValue="halls" className="w-full">
+                    <div className="p-2 border-b bg-slate-50 rounded-t-md">
+                      <TabsList className="bg-transparent border-slate-200 border">
+                        <TabsTrigger value="halls" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                          Hall Configurations
+                          {occupiedHalls.length > 0 && (
+                            <span className="ml-2 bg-primary/10 text-primary text-xs px-1.5 py-0.5 rounded-full font-bold">
+                              {occupiedHalls.length}
+                            </span>
+                          )}
+                        </TabsTrigger>
+                        <TabsTrigger value="departments" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Department Breakdown</TabsTrigger>
+                      </TabsList>
+                    </div>
+                    
+                    <TabsContent value="halls" className="mt-0">
+                       {occupiedHalls.length === 0 ? (
+                         <div className="text-center py-10 text-slate-400 text-sm italic">
+                           No halls have students assigned for this session yet.
+                         </div>
+                       ) : (
+                         <Table>
+                           <TableHeader>
+                             <TableRow className="bg-white">
+                               <TableHead>Hall Name</TableHead>
+                               <TableHead>Students Assigned</TableHead>
+                               <TableHead>Configuration</TableHead>
+                               <TableHead className="text-right">Actions</TableHead>
+                             </TableRow>
+                           </TableHeader>
+                           <TableBody>
+                             {occupiedHalls.map(({ hall, studentCount }) => (
+                               <TableRow key={hall._id}>
+                                 <TableCell className="font-bold whitespace-nowrap text-[15px]">{hall.name}</TableCell>
+                                 <TableCell>
+                                   <span className="font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded">
+                                     {studentCount}
+                                   </span>
+                                   <span className="text-slate-500 text-sm ml-1">students</span>
+                                 </TableCell>
+                                 <TableCell className="text-slate-500 text-sm">{hall.rows} rows × {hall.columns} cols</TableCell>
+                                 <TableCell className="text-right">
+                                   <Button variant="outline" size="sm" onClick={() => handleViewHall(hall._id)}>
+                                     <View className="h-4 w-4 mr-2" /> View &amp; Configure Hall
+                                   </Button>
+                                 </TableCell>
+                               </TableRow>
+                             ))}
+                           </TableBody>
+                         </Table>
+                       )}
+                    </TabsContent>
 
-          {/* Display chips logic ... (Shortened for brevity but functionality remains) */}
-          {(skipRollNumbers.length > 0 || manualRollNumbers.length > 0) && (
-            <div className="flex flex-wrap gap-2 text-sm text-gray-500">
-              {skipRollNumbers.length} skipped, {manualRollNumbers.length} manually added.
-              {/* Chips logic omitted for brevity, keeping it simple */}
+                    <TabsContent value="departments" className="mt-0">
+                       <Table>
+                         <TableHeader>
+                           <TableRow className="bg-white">
+                             <TableHead>Hall Name</TableHead>
+                             <TableHead>Total Students</TableHead>
+                             <TableHead>Roll Numbers Range</TableHead>
+                             <TableHead>Department</TableHead>
+                           </TableRow>
+                         </TableHeader>
+                         <TableBody>
+                           {groupedSeating.map((row: any, idx: number) => (
+                             <TableRow key={idx}>
+                               <TableCell className="font-medium whitespace-nowrap">{row.hallName}</TableCell>
+                               <TableCell><span className="font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded">{row.count}</span></TableCell>
+                               <TableCell className="font-bold text-sm leading-relaxed max-w-md">{row.formatted}</TableCell>
+                               <TableCell>{row.department}</TableCell>
+                             </TableRow>
+                           ))}
+                         </TableBody>
+                       </Table>
+                    </TabsContent>
+                  </Tabs>
+                </div>
             </div>
           )}
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Hall Name</TableHead>
-              <TableHead>Configuration</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {halls.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={3} className="text-center py-8 text-gray-500">
-                  No exam halls created yet.
-                </TableCell>
-              </TableRow>
-            ) : (
-              halls.map(hall => (
-                <TableRow key={hall._id}>
-                  <TableCell className="font-medium">{hall.name}</TableCell>
-                  <TableCell>
-                    {hall.rows} rows × {hall.columns} columns
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleViewHall(hall._id)}
-                      disabled={!selectedSessionId}
-                    >
-                      View & Configure
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
+      {/* Delete / Shortage Dialogs */}
       <AlertDialog open={showUnallocatedDialog} onOpenChange={setShowUnallocatedDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -808,92 +899,6 @@ const SeatingPlans = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Manual Roll Number Addition Dialog */}
-      <Dialog open={showManualAddDialog} onOpenChange={setShowManualAddDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Manual Roll Numbers</DialogTitle>
-            <DialogDescription>These rolls will be prioritized.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <Input
-              placeholder="e.g., 911123149999"
-              value={manualRollInput}
-              onChange={(e) => setManualRollInput(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button onClick={handleAddManualRollNumbers}>Add</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Create Session Dialog */}
-      <Dialog open={showCreateSessionDialog} onOpenChange={setShowCreateSessionDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New Exam Session</DialogTitle>
-            <DialogDescription>Define a new exam date and session to generate seating for.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Exam Date</Label>
-              <Input type="date" value={newSessionData.examDate} onChange={e => setNewSessionData({ ...newSessionData, examDate: e.target.value })} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Session</Label>
-              <select className="border p-2 rounded" value={newSessionData.examSession} onChange={e => setNewSessionData({ ...newSessionData, examSession: e.target.value as any })}>
-                <option value="FN">Forenoon (FN)</option>
-                <option value="AN">Afternoon (AN)</option>
-              </select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Time</Label>
-              <Input value={newSessionData.examTime} onChange={e => setNewSessionData({ ...newSessionData, examTime: e.target.value })} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={handleCreateSession} disabled={creatingSession}>
-              {creatingSession ? "Creating..." : "Create Session"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Session Dialog */}
-      <Dialog open={showEditSessionDialog} onOpenChange={setShowEditSessionDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Exam Session</DialogTitle>
-            <DialogDescription>Modify the details of this exam session.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Exam Date</Label>
-              <Input type="date" value={editSessionData.examDate} onChange={e => setEditSessionData({ ...editSessionData, examDate: e.target.value })} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Session</Label>
-              <select className="border p-2 rounded" value={editSessionData.examSession} onChange={e => setEditSessionData({ ...editSessionData, examSession: e.target.value as any })}>
-                <option value="FN">Forenoon (FN)</option>
-                <option value="AN">Afternoon (AN)</option>
-              </select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Time</Label>
-              <Input value={editSessionData.examTime} onChange={e => setEditSessionData({ ...editSessionData, examTime: e.target.value })} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditSessionDialog(false)}>Cancel</Button>
-            <Button onClick={handleEditSession} disabled={editingSession}>
-              {editingSession ? "Saving..." : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Session Alert Dialog */}
       <AlertDialog open={showDeleteSessionDialog} onOpenChange={setShowDeleteSessionDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -916,6 +921,6 @@ const SeatingPlans = () => {
       </AlertDialog>
     </div>
   );
-};
+}
 
 export default SeatingPlans;

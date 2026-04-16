@@ -1,6 +1,7 @@
 import Hall from "../models/Hall.js";
 import FacultyDuty from "../models/FacultyDuty.js";
 import ExamSession from "../models/ExamSession.js";
+import AnnaSeating from "../models/AnnaSeating.js";
 
 export const createHall = async (req, res) => {
   try {
@@ -278,6 +279,57 @@ export const updateHall = async (req, res) => {
     res.json(updatedHall);
   } catch (error) {
     console.error("Update hall error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/* ===============================
+   GET ALL COMBINED EXAM DATES
+   Returns both Internal (ExamSession) and Anna University (AnnaSeating) dates
+================================ */
+export const getAllExamDates = async (req, res) => {
+  try {
+    // Fetch internal exam sessions
+    const internalSessions = await ExamSession.find({}).sort({ examDate: 1, examSession: 1 }).lean();
+
+    // Fetch Anna University seating plans
+    const annaSessions = await AnnaSeating.find({}).sort({ examDate: 1, session: 1 }).lean();
+
+    // Normalise internal sessions
+    const internalFormatted = internalSessions.map(s => ({
+      _id: s._id.toString(),
+      examDate: s.examDate,
+      examSession: s.examSession,
+      examTime: s.examTime || (s.examSession === 'FN' ? '09:30 AM' : '01:30 PM'),
+      status: s.status || 'DRAFT',
+      type: 'internal',
+      activeHalls: s.activeHalls || []
+    }));
+
+    // Normalise Anna University sessions
+    const annaFormatted = annaSessions.map(s => ({
+      _id: s._id.toString(),
+      examDate: s.examDate,
+      examSession: s.session,
+      examTime: s.session === 'FN' ? '09:30 AM' : '01:30 PM',
+      status: s.status || 'DRAFT',
+      type: 'anna',
+      activeHalls: [] // Anna seating doesn't use session-level activeHalls
+    }));
+
+    // Merge and sort
+    const combined = [...internalFormatted, ...annaFormatted].sort((a, b) => {
+      const dateCompare = new Date(a.examDate) - new Date(b.examDate);
+      if (dateCompare !== 0) return dateCompare;
+      // FN before AN for same date
+      if (a.examSession !== b.examSession) return a.examSession === 'FN' ? -1 : 1;
+      // Internal before Anna for exact same slot
+      return a.type === 'internal' ? -1 : 1;
+    });
+
+    res.json(combined);
+  } catch (error) {
+    console.error("getAllExamDates error:", error);
     res.status(500).json({ error: error.message });
   }
 };

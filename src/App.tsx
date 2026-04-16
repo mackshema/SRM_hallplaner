@@ -8,7 +8,7 @@ import Login from "./pages/Login";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminOverview from "./pages/admin/Overview";
 import HallsManagement from "./pages/admin/Halls";
-import DepartmentsManagement from "./pages/admin/Departments";
+
 import SeatingPlans from "./pages/admin/SeatingPlans";
 import SeatingPlanDetails from "./pages/admin/SeatingPlanDetails";
 import ExamRestrictions from "./pages/admin/ExamRestrictions";
@@ -62,7 +62,7 @@ const App = () => (
             <Route index element={<Navigate to="/admin/overview" replace />} />
             <Route path="overview" element={<AdminOverview />} />
             <Route path="halls" element={<HallsManagement />} />
-            <Route path="departments" element={<DepartmentsManagement />} />
+
             <Route path="seating-plans" element={<SeatingPlans />} />
             <Route path="seating-plans/:id" element={<SeatingPlanDetails />} />
             <Route path="anna-university" element={<AnnaUniversityPlanner />} />

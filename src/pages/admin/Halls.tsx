@@ -33,6 +33,17 @@ import {
 } from "@/components/ui/table";
 import { toast } from "@/components/ui/use-toast";
 import { db, Hall, User, ExamSession } from "@/lib/db";
+
+// Extended type that covers both internal and Anna University plan dates
+interface CombinedExamDate {
+  _id: string;
+  examDate: string;
+  examSession: "FN" | "AN";
+  examTime: string;
+  status: string;
+  type: 'internal' | 'anna';
+  activeHalls: string[];
+}
 import {
   Select,
   SelectContent,
@@ -63,21 +74,24 @@ const HallsManagement = () => {
     floor: "Ground Floor"
   });
   const [searchQuery, setSearchQuery] = useState("");
-  const [examSessions, setExamSessions] = useState<ExamSession[]>([]);
+  const [examSessions, setExamSessions] = useState<CombinedExamDate[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const navigate = useNavigate();
 
-  // 1. Fetch Sessions on Mount
+  // 1. Fetch ALL combined exam dates (Internal + Anna University) on Mount
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        const sessionsData = await db.getExamSessions();
-        setExamSessions(sessionsData);
-        if (sessionsData.length > 0) {
-          setSelectedSessionId(prev => prev || sessionsData[0]._id);
+        const res = await fetch('http://localhost:5000/api/halls/all-exam-dates');
+        if (res.ok) {
+          const data = await res.json();
+          setExamSessions(data || []);
+          if (data && data.length > 0) {
+            setSelectedSessionId(prev => prev || data[0]._id);
+          }
         }
       } catch (error) {
-        console.error("Error fetching sessions:", error);
+        console.error("Error fetching combined exam dates:", error);
       }
     };
     fetchSessions();
@@ -88,8 +102,10 @@ const HallsManagement = () => {
     const fetchHalls = async () => {
       setLoading(true);
       try {
+        // For internal sessions pass the session id; for Anna sessions we just load all halls
+        const selectedSession = examSessions.find(s => s._id === selectedSessionId);
         let url = "http://localhost:5000/api/halls";
-        if (selectedSessionId) {
+        if (selectedSessionId && selectedSession?.type === 'internal') {
           url += `?examSessionId=${selectedSessionId}`;
         }
 
@@ -109,7 +125,7 @@ const HallsManagement = () => {
     };
 
     fetchHalls();
-  }, [selectedSessionId]);
+  }, [selectedSessionId, examSessions]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -231,9 +247,16 @@ const HallsManagement = () => {
 
 
   const handleViewHall = (hallId: string) => {
-    // Pass session context to Seating Plans view
-    navigate(`/admin/seating-plans/${hallId}?examSessionId=${selectedSessionId}`);
+    const session = examSessions.find(s => s._id === selectedSessionId);
+    if (session?.type === 'anna') {
+      // For Anna University sessions, navigate to the Anna planner
+      navigate('/admin/anna-university');
+    } else {
+      // For Internal sessions, navigate to the hall seating detail page
+      navigate(`/admin/seating-plans/${hallId}?examSessionId=${selectedSessionId}`);
+    }
   };
+
 
   const handleDeleteHall = async (hallId: string) => {
     try {
@@ -286,6 +309,9 @@ const HallsManagement = () => {
     const session = examSessions.find(s => s._id === selectedSessionId);
     if (!session) return false;
 
+    // Anna University sessions don't have per-session hall selection — treat all as active
+    if (session.type === 'anna') return true;
+
     // If activeHalls is undefined (legacy sessions), assume ALL are active unless migrated
     if (!session.activeHalls) return true;
 
@@ -300,6 +326,12 @@ const HallsManagement = () => {
 
     const session = examSessions.find(s => s._id === selectedSessionId);
     if (!session) return;
+
+    // Anna University plans don't support per-session hall toggling here
+    if (session.type === 'anna') {
+      toast({ title: "Anna University Plan", description: "Hall selection for Anna University plans is managed in the Anna University Planner.", variant: "destructive" });
+      return;
+    }
 
     const currentActive: string[] = session.activeHalls || halls.map(h => h._id); // Default to all if missing
     const isActive = currentActive.includes(hall._id);
@@ -342,6 +374,12 @@ const HallsManagement = () => {
 
     const session = examSessions.find(s => s._id === selectedSessionId);
     if (!session) return;
+
+    // Anna University plans don't support per-session hall toggling here
+    if (session.type === 'anna') {
+      toast({ title: "Anna University Plan", description: "Hall selection for Anna University plans is managed in the Anna University Planner.", variant: "destructive" });
+      return;
+    }
 
     const currentActive: string[] = session.activeHalls || [];
     // Determine target state based on first filtered hall
@@ -397,6 +435,14 @@ const HallsManagement = () => {
 
   const selectedSession = examSessions.find(s => s._id === selectedSessionId);
 
+  // Helper to format the session label shown in the header
+  const getSessionLabel = (session: CombinedExamDate | undefined) => {
+    if (!session) return "";
+    const typeLabel = session.type === 'anna' ? '🎓 Anna University' : '📋 Internal';
+    const statusLabel = session.status === 'FINAL' ? 'Locked Plan' : 'Draft Mode';
+    return `${typeLabel} — ${session.examDate} (${session.examSession}) • ${statusLabel}`;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -409,21 +455,50 @@ const HallsManagement = () => {
           {/* SESSION SELECTOR */}
           <div className="flex flex-col items-end">
             <select
-              className="border p-2 rounded-md bg-white text-sm min-w-[200px]"
+              className="border p-2 rounded-md bg-white text-sm min-w-[280px] max-w-xs"
               value={selectedSessionId}
               onChange={(e) => handleSessionChange(e.target.value)}
             >
-              <option value="" disabled>Select Session Context</option>
-              {examSessions.map(s => (
-                <option key={s._id} value={s._id}>
-                  {s.examDate} ({s.examSession}) - {s.status}
-                </option>
-              ))}
+              <option value="" disabled>Select Exam Date / Session</option>
+
+              {/* Group: Internal Exams */}
+              {examSessions.filter(s => s.type === 'internal').length > 0 && (
+                <optgroup label="📋 Internal Examinations">
+                  {examSessions.filter(s => s.type === 'internal').map(s => (
+                    <option key={s._id} value={s._id}>
+                      {s.examDate} ({s.examSession}) — {s.status}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+
+              {/* Group: Anna University */}
+              {examSessions.filter(s => s.type === 'anna').length > 0 && (
+                <optgroup label="🎓 Anna University">
+                  {examSessions.filter(s => s.type === 'anna').map(s => (
+                    <option key={s._id} value={s._id}>
+                      {s.examDate} ({s.examSession}) — {s.status}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+
+              {examSessions.length === 0 && (
+                <option value="" disabled>No exam plans available yet</option>
+              )}
             </select>
+
             {selectedSession && (
-              <span className={`text-xs mt-1 px-2 py-0.5 rounded-full ${selectedSession.status === 'FINAL' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                {selectedSession.status === 'FINAL' ? 'Locked Plan' : 'Draft Mode'}
-              </span>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold
+                  ${selectedSession.type === 'anna' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                  {selectedSession.type === 'anna' ? '🎓 Anna University' : '📋 Internal'}
+                </span>
+                <span className={`text-xs px-2 py-0.5 rounded-full
+                  ${selectedSession.status === 'FINAL' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                  {selectedSession.status === 'FINAL' ? 'Locked Plan' : 'Draft Mode'}
+                </span>
+              </div>
             )}
           </div>
 

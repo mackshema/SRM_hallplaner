@@ -5,12 +5,14 @@ import {
     getHallById,
     deleteHall,
     assignFacultyToHall,
-    updateHall
+    updateHall,
+    getAllExamDates
 } from "../controllers/hallController.js";
 
 const router = express.Router();
 
 router.post("/", createHall);
+router.get("/all-exam-dates", getAllExamDates);
 router.get("/", getAllHalls);
 router.get("/:id", getHallById);
 router.delete("/:id", deleteHall);

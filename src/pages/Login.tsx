@@ -111,16 +111,16 @@ const Login = () => {
           </p>
         </div>
 
-        {/* Debug info - remove in production */}
+        {/* Credentials Info */}
         <CardFooter className="text-xs text-gray-500">
-          <div className="w-full">
-            <p>Admin: SRM@Admin / Admin@12345678</p>
-            <p>Faculty: faculty@1234 / srm@123456789</p>
-            <p>Student: 911123149001 / student123</p>
+          <div className="w-full space-y-1">
+            <p><strong>Admin:</strong> SRM@Admin / Admin@12345678</p>
+            <p><strong>Faculty:</strong> faculty@1234 / srm@123456789</p>
+            <p><strong>Students:</strong> Any Real Roll Number / student123</p>
           </div>
         </CardFooter>
       </Card>
-    </div >
+    </div>
   );
 };
 

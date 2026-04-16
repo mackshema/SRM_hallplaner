@@ -11,7 +11,7 @@ import {
     PageOrientation,
     BorderStyle,
 } from "docx";
-import { Hall, Department } from "./db";
+import { Hall } from "./db";
 
 type StudentSeat = {
     row: number;
@@ -35,7 +35,7 @@ interface ExportBenchLayoutWordOptions {
     hall: Hall;
     seats: StudentSeat[][];
     seatAssignments?: any[]; // Allow passing raw assignments for full coverage
-    departments: Department[];
+    departments?: any[]; // kept for API compatibility, no longer used
     examDate: string;
     examSession: string;
     examTime: string;
@@ -201,13 +201,8 @@ export const exportBenchLayoutWordDoc = async ({
     );
 
     Object.keys(deptGroups).forEach((deptIdStr) => {
-        const deptId = parseInt(deptIdStr);
-        // Find department by matching both id (number) and _id (string from MongoDB)
-        const dept = departments.find((d) =>
-            d.id === deptId ||
-            String(d._id || d.id) === deptIdStr ||
-            String(d._id || d.id) === String(deptId)
-        );
+        // departmentId is now a plain string (e.g. 'CSE') - use directly
+        const deptName = deptIdStr;
         const rollNumbers = (deptGroups[deptIdStr] || []).sort((a, b) => {
             const numA = parseInt(a.replace(/\D/g, ''));
             const numB = parseInt(b.replace(/\D/g, ''));
@@ -224,7 +219,7 @@ export const exportBenchLayoutWordDoc = async ({
             summaryRows.push(
                 new TableRow({
                     children: [
-                        dept?.name || (deptId === 0 ? "Manual Entry" : "Unknown"),
+                        deptName || deptIdStr,
                         fromRoll,
                         toRoll,
                         count.toString(),
