@@ -653,34 +653,24 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         }
       }
 
-      // Find which columns have at least one student
+      // Total columns to show
       const totalColumns = hall.columns * hall.seatsPerBench;
-      const nonEmptyColumns: number[] = [];
-
+      const allColumns: number[] = [];
       for (let c = 0; c < totalColumns; c++) {
-        let hasStudent = false;
-        for (let r = 0; r < hall.rows; r++) {
-          if (seatGrid[r][c]) {
-            hasStudent = true;
-            break;
-          }
-        }
-        if (hasStudent) {
-          nonEmptyColumns.push(c);
-        }
+        allColumns.push(c);
       }
 
-      // Calculate seating grid dimensions based on non-empty columns
+      // Calculate seating grid dimensions based on all columns
       const gridStartY = summaryEndY + 8;
       const gridStartX = 14;
-      const cellWidth = Math.min(28, (400 - gridStartX) / nonEmptyColumns.length);
+      const cellWidth = Math.min(28, (400 - gridStartX) / allColumns.length);
       const cellHeight = 12;
 
       // Column labels (A, B, C, ...) - only for non-empty columns
       doc.setFontSize(9);
       doc.setFont("helvetica", "bold");
 
-      nonEmptyColumns.forEach((actualCol, displayIndex) => {
+      allColumns.forEach((actualCol, displayIndex) => {
         const columnLabel = String.fromCharCode(65 + actualCol); // A, B, C, ...
         const x = gridStartX + 12 + displayIndex * cellWidth;
         doc.text(columnLabel, x + cellWidth / 2, gridStartY - 2, { align: 'center' });
@@ -694,7 +684,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         doc.setFont("helvetica", "bold");
         doc.text((r + 1).toString(), gridStartX + 5, y + cellHeight / 2 + 2, { align: 'center' });
 
-        nonEmptyColumns.forEach((actualCol, displayIndex) => {
+        allColumns.forEach((actualCol, displayIndex) => {
           const x = gridStartX + 12 + displayIndex * cellWidth;
           const rollNumber = seatGrid[r][actualCol];
 

@@ -304,19 +304,10 @@ export const exportBenchLayoutWordDoc = async ({
         }
     }
 
-    // Identify non-empty columns
-    const nonEmptyColumns: number[] = [];
+    // Identify all columns
+    const allColumns: number[] = [];
     for (let c = 0; c < maxCol; c++) {
-        let hasStudent = false;
-        for (let r = 0; r < maxRow; r++) {
-            if (seatGrid[r] && seatGrid[r][c]) {
-                hasStudent = true;
-                break;
-            }
-        }
-        if (hasStudent) {
-            nonEmptyColumns.push(c);
-        }
+        allColumns.push(c);
     }
 
     const gridRows: TableRow[] = [];
@@ -325,10 +316,14 @@ export const exportBenchLayoutWordDoc = async ({
     gridRows.push(
         new TableRow({
             children: [
-                new TableCell({ children: [new Paragraph("")] }), // Row label column
-                ...nonEmptyColumns.map((actualCol) => {
+                new TableCell({
+                    width: { size: 5, type: WidthType.PERCENTAGE },
+                    children: [new Paragraph("")]
+                }), // Row label column
+                ...allColumns.map((actualCol) => {
                     const columnLabel = String.fromCharCode(65 + actualCol);
                     return new TableCell({
+                        width: { size: 95 / allColumns.length, type: WidthType.PERCENTAGE },
                         children: [
                             new Paragraph({
                                 children: [new TextRun({ text: columnLabel, bold: true, size: 18 })],
@@ -348,6 +343,7 @@ export const exportBenchLayoutWordDoc = async ({
         // Row Number Label
         rowCells.push(
             new TableCell({
+                width: { size: 5, type: WidthType.PERCENTAGE },
                 children: [
                     new Paragraph({
                         children: [new TextRun({ text: (r + 1).toString(), bold: true, size: 18 })],
@@ -358,12 +354,13 @@ export const exportBenchLayoutWordDoc = async ({
         );
 
         // Roll Numbers
-        nonEmptyColumns.forEach((actualCol) => {
+        allColumns.forEach((actualCol) => {
             const rollNumber = seatGrid[r][actualCol] || "";
             const isBoldColumn = actualCol % 2 === 0;
 
             rowCells.push(
                 new TableCell({
+                    width: { size: 95 / allColumns.length, type: WidthType.PERCENTAGE },
                     children: [
                         new Paragraph({
                             children: [

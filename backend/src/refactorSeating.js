@@ -1,5 +1,4 @@
-const fs = require('fs');
-
+import fs from 'fs';
 const file = 'c:\\Users\\sivas\\hall-harmony-planner-43850\\src\\pages\\admin\\SeatingPlans.tsx';
 let content = fs.readFileSync(file, 'utf8');
 
@@ -17,7 +16,7 @@ content = content.replace(/const \[generating, setGenerating\] = useState\(false
 
 // Replace handleGenerateAllSeatingPlans with our new bulk generator
 const newGenerateFn = `
-  const handleBulkTmetableGeneratio = async () => {
+  const handleBulkTimetableGeneration = async () => {
     setGenerating(true);
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -72,11 +71,11 @@ content = content.replace(/const handleCreateSession = async/, newGenerateFn + '
 // We'll replace the div with className="flex gap-2" inside the header
 const headerPattern = /<div className="flex gap-2">[\s\S]*?<Button onClick=\{\(\) => setShowCreateSessionDialog\(true\)\} variant="secondary">[\s\S]*?New Exam Date[\s\S]*?<\/Button>/;
 
-const newControls = \`
+const newControls = `
    <div className="flex flex-col items-end gap-2">
       <div className="flex items-center gap-2 mb-2 p-2 bg-white rounded-md border text-sm">
          <Label className="cursor-pointer bg-gray-100 hover:bg-gray-200 p-2 rounded-md transition-colors border">
-           \${lastUploadedName ? 'Change Timetable Data' : 'Upload Extracted Timetable (Excel)'}
+           {lastUploadedName ? 'Change Timetable Data' : 'Upload Extracted Timetable (Excel)'}
            <Input 
              type="file" 
              accept=".xlsx, .xls" 
@@ -88,14 +87,14 @@ const newControls = \`
          {timetableFile && (
            <Button onClick={handleUploadTimetable} size="sm" variant="default" className="h-8">Upload</Button>
          )}
-         <Button onClick={handleBulkTmetableGeneratio} disabled={generating} size="sm" variant="default" className="h-8 ml-2 bg-indigo-600 hover:bg-indigo-700 text-white">
+         <Button onClick={handleBulkTimetableGeneration} disabled={generating} size="sm" variant="default" className="h-8 ml-2 bg-indigo-600 hover:bg-indigo-700 text-white">
            {generating ? "Generating..." : "Generate ALL Timetable Seating"}
          </Button>
       </div>
 
       <div className="flex gap-2">
         <div className="flex gap-1 items-center bg-white border rounded-md p-1 shadow-sm">
-\`;
+`;
 
 content = content.replace(/<div className="flex gap-2">[\s\S]*?<div className="flex gap-1 items-center bg-white border rounded-md p-1 shadow-sm">/, newControls);
 
@@ -108,9 +107,9 @@ content = content.replace(oldGenerateBtnPattern, '');
 
 // Export logic relies on `departments` arrays. We need to fix `exportConsolidatedPlan`!
 // It references `departments.find(d => ...)`
-const exportFix = \`          // Using the departmentId straight as string since Department model is obsoleted
+const exportFix = `          // Using the departmentId straight as string since Department model is obsoleted
           const deptName = deptId;
-\`;
+`;
 content = content.replace(/const dept = departments\.find[\s\S]*?\);/, exportFix);
 content = content.replace(/dept\?\.name \|\| "Unknown"/, 'deptName');
 

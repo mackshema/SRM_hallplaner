@@ -169,8 +169,9 @@ export const downloadAnnaExamPackage = async (req, res) => {
             };
         });
 
-        // Halls lookup using local assignments attached halls
-        const usedHallsList = [...new Set(assignments.map(a => JSON.stringify({ _id: a.hallId, name: a.hallName, seatsPerBench: 2, rows: Math.max(...assignments.filter(as => as.hallId===a.hallId).map(as => as.row)), columns: Math.max(...assignments.filter(as => as.hallId===a.hallId).map(as => as.column)) })))].map(s => JSON.parse(s));
+        // Halls lookup - Fetch actual Hall objects to get real rows/columns
+        const usedHallIds = [...new Set(assignments.map(a => a.hallId.toString()))];
+        const usedHallsList = await Hall.find({ _id: { $in: usedHallIds } }).lean();
         const duties = await FacultyDuty.find({ examDate: examDate, examSession: session }).populate('facultyId hallId').lean();
 
         // Setup archiver
@@ -267,7 +268,8 @@ export const downloadAnnaConsolidated = async (req, res) => {
         const uniqueDepts = [...new Set(assignments.map(a => a.department))];
         const syntheticDepts = uniqueDepts.map((d, i) => ({ _id: `D${i}`, name: d, id: `D${i}` }));
         const compatAssignments = assignments.map(a => ({ ...a, departmentId: syntheticDepts.find(d => d.name === a.department)?._id || "UNKNOWN" }));
-        const usedHallsList = [...new Set(assignments.map(a => JSON.stringify({ _id: a.hallId, name: a.hallName, seatsPerBench: 2, rows: Math.max(...assignments.filter(as => as.hallId===a.hallId).map(as => as.row)), columns: Math.max(...assignments.filter(as => as.hallId===a.hallId).map(as => as.column)) })))].map(s => JSON.parse(s));
+        const usedHallIds = [...new Set(assignments.map(a => a.hallId.toString()))];
+        const usedHallsList = await Hall.find({ _id: { $in: usedHallIds } }).lean();
 
         const consolidatedPdf = await generateConsolidatedPdf({
             assignments: compatAssignments,
@@ -309,7 +311,8 @@ export const downloadAnnaLayouts = async (req, res) => {
         const uniqueDepts = [...new Set(assignments.map(a => a.department))];
         const syntheticDepts = uniqueDepts.map((d, i) => ({ _id: `D${i}`, name: d, id: `D${i}` }));
         const compatAssignments = assignments.map(a => ({ ...a, departmentId: syntheticDepts.find(d => d.name === a.department)?._id || "UNKNOWN" }));
-        const usedHallsList = [...new Set(assignments.map(a => JSON.stringify({ _id: a.hallId, name: a.hallName, seatsPerBench: 2, rows: Math.max(...assignments.filter(as => as.hallId===a.hallId).map(as => as.row)), columns: Math.max(...assignments.filter(as => as.hallId===a.hallId).map(as => as.column)) })))].map(s => JSON.parse(s));
+        const usedHallIds = [...new Set(assignments.map(a => a.hallId.toString()))];
+        const usedHallsList = await Hall.find({ _id: { $in: usedHallIds } }).lean();
 
         const buffer = await generateAllBenchLayoutsDocx({
             halls: usedHallsList,

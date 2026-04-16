@@ -323,18 +323,9 @@ export const generateBenchLayoutDocx = async ({
         }
     });
 
-    const nonEmptyColumns = [];
+    const allColumns = [];
     for (let c = 0; c < maxCol; c++) {
-        let hasStudent = false;
-        for (let r = 0; r < maxRow; r++) {
-            if (seatGrid[r] && seatGrid[r][c]) {
-                hasStudent = true;
-                break;
-            }
-        }
-        if (hasStudent) {
-            nonEmptyColumns.push(c);
-        }
+        allColumns.push(c);
     }
 
     const gridRows = [];
@@ -343,10 +334,14 @@ export const generateBenchLayoutDocx = async ({
     gridRows.push(
         new TableRow({
             children: [
-                new TableCell({ children: [new Paragraph("")] }), // Row label column
-                ...nonEmptyColumns.map((actualCol) => {
+                new TableCell({
+                    width: { size: 5, type: WidthType.PERCENTAGE },
+                    children: [new Paragraph("")]
+                }), // Row label column
+                ...allColumns.map((actualCol) => {
                     const columnLabel = String.fromCharCode(65 + actualCol);
                     return new TableCell({
+                        width: { size: 95 / allColumns.length, type: WidthType.PERCENTAGE },
                         children: [
                             new Paragraph({
                                 children: [new TextRun({ text: columnLabel, bold: true, size: 18 })],
@@ -364,6 +359,7 @@ export const generateBenchLayoutDocx = async ({
         const rowCells = [];
         rowCells.push(
             new TableCell({
+                width: { size: 5, type: WidthType.PERCENTAGE },
                 children: [
                     new Paragraph({
                         children: [new TextRun({ text: (r + 1).toString(), bold: true, size: 18 })],
@@ -373,11 +369,12 @@ export const generateBenchLayoutDocx = async ({
             })
         );
 
-        nonEmptyColumns.forEach((actualCol) => {
+        allColumns.forEach((actualCol) => {
             const rollNumber = seatGrid[r][actualCol] || "";
             const isBoldColumn = actualCol % 2 === 0;
             rowCells.push(
                 new TableCell({
+                    width: { size: 95 / allColumns.length, type: WidthType.PERCENTAGE },
                     children: [
                         new Paragraph({
                             children: [
@@ -634,34 +631,37 @@ export const generateAllBenchLayoutsDocx = async ({
             }
         });
 
-        const nonEmptyColumns = [];
+        const allColumns = [];
         for (let c = 0; c < maxCol; c++) {
-            let hasStudent = false;
-            for (let r = 0; r < maxRow; r++) {
-                if (seatGrid[r] && seatGrid[r][c]) {
-                    hasStudent = true;
-                    break;
-                }
-            }
-            if (hasStudent) nonEmptyColumns.push(c);
+            allColumns.push(c);
         }
 
+        const colWidth = 95 / allColumns.length;
         const gridRows = [];
         gridRows.push(
             new TableRow({
                 children: [
-                    new TableCell({ children: [new Paragraph("")] }),
-                    ...nonEmptyColumns.map((actualCol) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String.fromCharCode(65 + actualCol), bold: true, size: 18 })], alignment: AlignmentType.CENTER })] })),
+                    new TableCell({ width: { size: 5, type: WidthType.PERCENTAGE }, children: [new Paragraph("")] }),
+                    ...allColumns.map((actualCol) => new TableCell({
+                        width: { size: colWidth, type: WidthType.PERCENTAGE },
+                        children: [new Paragraph({ children: [new TextRun({ text: String.fromCharCode(65 + actualCol), bold: true, size: 18 })], alignment: AlignmentType.CENTER })]
+                    })),
                 ],
             })
         );
 
         for (let r = 0; r < maxRow; r++) {
             const rowCells = [];
-            rowCells.push(new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: (r + 1).toString(), bold: true, size: 18 })], alignment: AlignmentType.CENTER })] }));
-            nonEmptyColumns.forEach((actualCol) => {
+            rowCells.push(new TableCell({
+                width: { size: 5, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ children: [new TextRun({ text: (r + 1).toString(), bold: true, size: 18 })], alignment: AlignmentType.CENTER })]
+            }));
+            allColumns.forEach((actualCol) => {
                 const rollNumber = seatGrid[r][actualCol] || "";
-                rowCells.push(new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: rollNumber, bold: !!rollNumber && (actualCol % 2 === 0), italics: !!rollNumber && !(actualCol % 2 === 0), size: 14 })], alignment: AlignmentType.CENTER })] }));
+                rowCells.push(new TableCell({
+                    width: { size: colWidth, type: WidthType.PERCENTAGE },
+                    children: [new Paragraph({ children: [new TextRun({ text: rollNumber, bold: !!rollNumber && (actualCol % 2 === 0), italics: !!rollNumber && !(actualCol % 2 === 0), size: 14 })], alignment: AlignmentType.CENTER })]
+                }));
             });
             gridRows.push(new TableRow({ children: rowCells }));
         }

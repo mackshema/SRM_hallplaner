@@ -297,13 +297,20 @@ export const generateAnnaSeating = async (req, res) => {
       return res.status(400).json({ error: "No halls selected for generation" });
     }
 
+    // Randomize Hall Filling Order
+    const startIndex = Math.floor(Math.random() * halls.length);
+    const orderedHalls = [
+      ...halls.slice(startIndex),
+      ...halls.slice(0, startIndex),
+    ];
+
     const allAssignments = [];
     let studentQueue = [...students];
 
     // Delete existing plan mapping for this date/session to overwrite
     await AnnaSeating.deleteMany({ examDate, session });
 
-    for (const hall of halls) {
+    for (const hall of orderedHalls) {
       if (studentQueue.length === 0) break;
 
       const assignmentInHall = [];
@@ -395,15 +402,22 @@ export const generateAnnaSeating = async (req, res) => {
       });
     }
 
-    // --- Added Faculty Allocation for Anna University ---
+    // --- Randomized Faculty Allocation for Anna University ---
     const allFaculty = await User.find({ role: 'faculty' }).lean();
+    // Fisher-Yates Shuffle
+    const shuffledFaculty = [...allFaculty];
+    for (let i = shuffledFaculty.length - 1; i > 0; i--) {
+       const j = Math.floor(Math.random() * (i + 1));
+       [shuffledFaculty[i], shuffledFaculty[j]] = [shuffledFaculty[j], shuffledFaculty[i]];
+    }
+
     let fIndex = 0;
-    for (const hall of halls) {
+    for (const hall of orderedHalls) {
        let req = hall.facultyRequired || 1;
        const hallAssignedIds = [];
        for (let i=0; i < req; i++) {
-          if (fIndex < allFaculty.length) {
-             hallAssignedIds.push(allFaculty[fIndex]._id);
+          if (fIndex < shuffledFaculty.length) {
+             hallAssignedIds.push(shuffledFaculty[fIndex]._id);
              fIndex++;
           }
        }
@@ -591,8 +605,10 @@ export const generateAllAnnaSeating = async (req, res) => {
 
        const allAssignments = [];
        let studentQueue = [...students];
+       const startIndex = Math.floor(Math.random() * halls.length);
+       const orderedHalls = [...halls.slice(startIndex), ...halls.slice(0, startIndex)];
 
-       for (const hall of halls) {
+       for (const hall of orderedHalls) {
          if (studentQueue.length === 0) break;
 
          const assignmentInHall = [];
@@ -675,13 +691,19 @@ export const generateAllAnnaSeating = async (req, res) => {
        generatedCount++;
 
        const allFaculty = await User.find({ role: 'faculty' }).lean();
+       const shuffledFaculty = [...allFaculty];
+       for (let i = shuffledFaculty.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffledFaculty[i], shuffledFaculty[j]] = [shuffledFaculty[j], shuffledFaculty[i]];
+       }
+
        let fIndex = 0;
-       for (const hall of halls) {
+       for (const hall of orderedHalls) {
           let req = hall.facultyRequired || 1;
           const hallAssignedIds = [];
           for (let i=0; i < req; i++) {
-             if (fIndex < allFaculty.length) {
-                hallAssignedIds.push(allFaculty[fIndex]._id);
+             if (fIndex < shuffledFaculty.length) {
+                hallAssignedIds.push(shuffledFaculty[fIndex]._id);
                 fIndex++;
              }
           }

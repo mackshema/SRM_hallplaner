@@ -85,7 +85,7 @@ const StudentsManagement = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [currentStudentId, setCurrentStudentId] = useState<string | null>(null);
-    const [formData, setFormData] = useState({ name: "", rollNumber: "", email: "" });
+    const [formData, setFormData] = useState<{name: string, rollNumber: string, email: string, program?: string, degree?: string, department?: string}>({ name: "", rollNumber: "", email: "" });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [skipEmail, setSkipEmail] = useState(false);
 
@@ -106,6 +106,7 @@ const StudentsManagement = () => {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadStats, setUploadStats] = useState<{total: number, success: number, skipped: number, skippedReasons: any[]} | null>(null);
     const [isUploadResultOpen, setIsUploadResultOpen] = useState(false);
+    const [isGlobalUploadOpen, setIsGlobalUploadOpen] = useState(false);
 
     useEffect(() => {
         localStorage.setItem("academicStructure_v2", JSON.stringify(structure));
@@ -232,7 +233,14 @@ const StudentsManagement = () => {
 
     const openAddModal = () => {
         setIsEditing(false);
-        setFormData({ name: "", rollNumber: "", email: "" });
+        setFormData({ 
+            name: "", 
+            rollNumber: "", 
+            email: "", 
+            program: selectedProgram || "", 
+            degree: selectedDegree || "", 
+            department: selectedDepartment || "" 
+        });
         setSkipEmail(false);
         setIsModalOpen(true);
     };
@@ -243,7 +251,10 @@ const StudentsManagement = () => {
         setFormData({ 
             name: student.name, 
             rollNumber: student.username, 
-            email: student.email || "" 
+            email: student.email || "",
+            program: student.program,
+            degree: student.degree,
+            department: student.department
         });
         setSkipEmail(false);
         setIsModalOpen(true);
@@ -265,9 +276,9 @@ const StudentsManagement = () => {
                     body: JSON.stringify({ 
                         ...formData, 
                         skipEmail,
-                        program: selectedProgram,
-                        degree: selectedDegree,
-                        department: selectedDepartment
+                        program: formData.program || selectedProgram,
+                        degree: formData.degree || selectedDegree,
+                        department: formData.department || selectedDepartment
                     })
                 });
                 
@@ -288,9 +299,9 @@ const StudentsManagement = () => {
                     body: JSON.stringify({ 
                         ...formData, 
                         password,
-                        program: selectedProgram,
-                        degree: selectedDegree,
-                        department: selectedDepartment
+                        program: formData.program || selectedProgram,
+                        degree: formData.degree || selectedDegree,
+                        department: formData.department || selectedDepartment
                     })
                 });
 
@@ -364,7 +375,7 @@ const StudentsManagement = () => {
     };
 
     // --- Excel Upload Logic ---
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleGlobalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
@@ -372,30 +383,55 @@ const StudentsManagement = () => {
         const reader = new FileReader();
 
         reader.onload = async (evt) => {
-            const bstr = evt.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
-            const wsname = wb.SheetNames[0];
-            const ws = wb.Sheets[wsname];
-            const data = XLSX.utils.sheet_to_json(ws);
-            
-            const formattedStudents = data.map((row: any) => ({
-                name: row["Name"] || row["name"],
-                rollNumber: String(row["Roll Number"] || row["rollNumber"] || row["RollNumber"] || ""),
-                email: row["Email"] || row["email"] || "",
-                password: "student123",
-                program: selectedProgram,
-                degree: selectedDegree,
-                department: selectedDepartment
-            })).filter(s => s.name && s.rollNumber);
-
-            if (formattedStudents.length === 0) {
-                toast({ title: "Invalid File", description: "Could not find valid columns.", variant: "destructive" });
-                setIsUploading(false);
-                if (fileInputRef.current) fileInputRef.current.value = "";
-                return;
-            }
-
             try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
+                
+                const newStructure = { ...structure };
+                let structureChanged = false;
+
+                const formattedStudents = data.map((row: any) => {
+                    const prog = row["Program"] || row["program"] || selectedProgram || "General";
+                    const deg = row["Year"] || row["year"] || row["Degree"] || row["degree"] || selectedDegree || "Year 1";
+                    const dept = row["Department"] || row["department"] || selectedDepartment || "General";
+
+                    // Update structure logically
+                    if (!newStructure[prog]) {
+                        newStructure[prog] = {};
+                        structureChanged = true;
+                    }
+                    if (!newStructure[prog][deg]) {
+                        newStructure[prog][deg] = [];
+                        structureChanged = true;
+                    }
+                    if (!newStructure[prog][deg].includes(dept)) {
+                        newStructure[prog][deg].push(dept);
+                        structureChanged = true;
+                    }
+
+                    return {
+                        name: row["Name"] || row["name"],
+                        rollNumber: String(row["Roll Number"] || row["rollNumber"] || row["RollNumber"] || ""),
+                        email: row["Email"] || row["email"] || "",
+                        password: "student123",
+                        program: prog,
+                        degree: deg,
+                        department: dept
+                    };
+                }).filter(s => s.name && s.rollNumber);
+
+                if (formattedStudents.length === 0) {
+                    toast({ title: "Invalid File", description: "No valid student records found.", variant: "destructive" });
+                    return;
+                }
+
+                if (structureChanged) {
+                    setStructure(newStructure);
+                }
+
                 const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/bulk-create`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -410,13 +446,15 @@ const StudentsManagement = () => {
                         skipped: result.skippedCount,
                         skippedReasons: result.skippedDetailed
                     });
+                    setIsGlobalUploadOpen(false);
                     setIsUploadResultOpen(true);
                     fetchStudents();
                 } else {
-                    toast({ title: "Upload Failed", description: "Server rejected the bulk creation.", variant: "destructive" });
+                    toast({ title: "Upload Failed", description: "Server error during bulk creation.", variant: "destructive" });
                 }
             } catch (error) {
-                toast({ title: "Upload Failed", description: "Network error during bulk upload.", variant: "destructive" });
+                console.error("Upload error:", error);
+                toast({ title: "Error", description: "Failed to process file.", variant: "destructive" });
             } finally {
                 setIsUploading(false);
                 if (fileInputRef.current) fileInputRef.current.value = "";
@@ -426,13 +464,15 @@ const StudentsManagement = () => {
         reader.readAsBinaryString(file);
     };
 
-    const downloadTemplate = () => {
-        const ws = XLSX.utils.json_to_sheet([
-            { "Name": "Chaitanya", "Roll Number": "91112314900X", "Email": "student@college.edu" }
-        ]);
+    const downloadTemplate = (isGlobal = false) => {
+        const templateData = isGlobal ? 
+            { "Name": "Chaitanya", "Roll Number": "91112314900X", "Email": "student@college.edu", "Program": "Engineering", "Year": "Year 2", "Department": "CSE" } :
+            { "Name": "Chaitanya", "Roll Number": "91112314900X", "Email": "student@college.edu" };
+
+        const ws = XLSX.utils.json_to_sheet([templateData]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Students");
-        XLSX.writeFile(wb, "Student_Upload_Template.xlsx");
+        XLSX.writeFile(wb, isGlobal ? "Global_Student_Upload_Template.xlsx" : "Student_Upload_Template.xlsx");
     };
 
     const filteredStudents = students.filter(student => 
@@ -494,33 +534,39 @@ const StudentsManagement = () => {
                     </h1>
                     <p className="text-slate-500 mt-1">Organize and manage students by their respective categories and departments.</p>
                 </div>
-                {selectedDepartment && (
-                    <div className="flex gap-3">
-                        <Button variant="outline" onClick={downloadTemplate} className="hidden sm:flex">
-                            <Download className="mr-2 h-4 w-4" /> Template
-                        </Button>
-                        
-                        <input 
-                            type="file" 
-                            accept=".xlsx, .xls, .csv" 
-                            ref={fileInputRef} 
-                            onChange={handleFileUpload} 
-                            className="hidden" 
-                        />
-                        <Button 
-                            variant="secondary" 
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={isUploading}
-                        >
-                            {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                            Bulk Upload
-                        </Button>
-                        
-                        <Button onClick={openAddModal}>
-                            <Plus className="mr-2 h-4 w-4" /> Add Student
-                        </Button>
-                    </div>
-                )}
+                <div className="flex gap-3">
+                    <Button variant="outline" onClick={() => setIsGlobalUploadOpen(true)} className="bg-primary/5 border-primary/20 hover:bg-primary/10 text-primary">
+                        <Upload className="mr-2 h-4 w-4" /> Global Bulk Upload
+                    </Button>
+
+                    {selectedDepartment && (
+                        <>
+                            <Button variant="outline" onClick={() => downloadTemplate(false)} className="hidden sm:flex">
+                                <Download className="mr-2 h-4 w-4" /> Template
+                            </Button>
+                            
+                            <input 
+                                type="file" 
+                                accept=".xlsx, .xls, .csv" 
+                                ref={fileInputRef} 
+                                onChange={handleGlobalFileUpload} 
+                                className="hidden" 
+                            />
+                            <Button 
+                                variant="secondary" 
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isUploading}
+                            >
+                                {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                                Context Upload
+                            </Button>
+                        </>
+                    )}
+                    
+                    <Button onClick={openAddModal} className="shadow-sm">
+                        <Plus className="mr-2 h-4 w-4" /> Add Student
+                    </Button>
+                </div>
             </div>
 
             {breadcrumbs}
@@ -869,11 +915,52 @@ const StudentsManagement = () => {
                         <DialogDescription>
                             {isEditing 
                                 ? "Update the student's details." 
-                                : `Adding to ${selectedDegree} > ${selectedDepartment}`}
+                                : selectedDepartment 
+                                    ? `Adding to ${selectedDegree} > ${selectedDepartment}`
+                                    : "Fill in the details to add a new student."}
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleSubmit}>
                         <div className="grid gap-4 py-4">
+                            {!isEditing && !selectedDepartment && (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                    <div className="space-y-1">
+                                        <Label className="text-xs">Program</Label>
+                                        <select 
+                                            className="w-full text-xs p-1 border rounded bg-white"
+                                            value={formData.program || ""}
+                                            onChange={(e) => setFormData(p => ({ ...p, program: e.target.value, degree: "", department: "" }))}
+                                        >
+                                            <option value="">Select...</option>
+                                            {Object.keys(structure).map(p => <option key={p} value={p}>{p}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs">Year/Category</Label>
+                                        <select 
+                                            className="w-full text-xs p-1 border rounded bg-white"
+                                            value={formData.degree || ""}
+                                            disabled={!formData.program}
+                                            onChange={(e) => setFormData(p => ({ ...p, degree: e.target.value, department: "" }))}
+                                        >
+                                            <option value="">Select...</option>
+                                            {formData.program && Object.keys(structure[formData.program] || {}).map(d => <option key={d} value={d}>{d}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs">Department</Label>
+                                        <select 
+                                            className="w-full text-xs p-1 border rounded bg-white"
+                                            value={formData.department || ""}
+                                            disabled={!formData.degree}
+                                            onChange={(e) => setFormData(p => ({ ...p, department: e.target.value }))}
+                                        >
+                                            <option value="">Select...</option>
+                                            {formData.program && formData.degree && (structure[formData.program][formData.degree] || []).map(d => <option key={d} value={d}>{d}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
                             <div className="grid gap-2">
                                 <Label htmlFor="name">Full Name <span className="text-red-500">*</span></Label>
                                 <Input id="name" name="name" placeholder="e.g., Chaitanya" required
@@ -931,6 +1018,73 @@ const StudentsManagement = () => {
             </Dialog>
 
             {/* Bulk Upload Results Modal */}
+            {/* Global Upload Dialog */}
+            <Dialog open={isGlobalUploadOpen} onOpenChange={setIsGlobalUploadOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Global Student Bulk Upload</DialogTitle>
+                        <DialogDescription>
+                            Upload an Excel file containing students for multiple programs and departments at once. 
+                            If a program or department doesn't exist, it will be created automatically.
+                        </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="space-y-6 pt-4">
+                        <ExcelUploadHelper
+                            columns={[
+                                { header: "Name",        example: "Chaitanya Kumar", required: true,  description: "Full name" },
+                                { header: "Roll Number", example: "911123149001",    required: true,  description: "Username" },
+                                { header: "Program",     example: "Engineering",     required: true,  description: "e.g. Engineering, MBA" },
+                                { header: "Year",        example: "Year 2",          required: true,  description: "Year or Category" },
+                                { header: "Department",  example: "CSE",             required: true,  description: "Dept name" },
+                                { header: "Email",       example: "student@srm.edu", required: false, description: "Optional email" },
+                            ]}
+                            templateFilename="Global_Student_Upload_Template.xlsx"
+                            sampleRows={[
+                                { "Name": "Alice Smith", "Roll Number": "2024CSE001", "Program": "Engineering", "Year": "Year 1", "Department": "CSE" },
+                                { "Name": "Bob Jones", "Roll Number": "2024MBA005", "Program": "MBA", "Year": "Year 1", "Department": "Finance" },
+                            ]}
+                        />
+
+                        <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 gap-4">
+                            <input 
+                                type="file" 
+                                accept=".xlsx, .xls, .csv" 
+                                onChange={handleGlobalFileUpload} 
+                                className="hidden" 
+                                id="global-upload-input"
+                            />
+                            <Label 
+                                htmlFor="global-upload-input" 
+                                className="flex flex-col items-center gap-3 cursor-pointer group"
+                            >
+                                <div className="p-4 bg-white rounded-full shadow-sm group-hover:bg-primary group-hover:text-white transition-all">
+                                    <FileSpreadsheet className="h-8 w-8 text-primary group-hover:text-white" />
+                                </div>
+                                <div className="text-center">
+                                    <p className="font-semibold text-slate-800">Click to select Excel file</p>
+                                    <p className="text-sm text-slate-500">Maximum file size: 5MB</p>
+                                </div>
+                            </Label>
+                            
+                            {isUploading && (
+                                <div className="flex items-center gap-2 text-primary font-medium animate-pulse">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Processing students and structure...
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    
+                    <DialogFooter className="sm:justify-between">
+                        <Button variant="ghost" onClick={() => downloadTemplate(true)} className="text-blue-600">
+                            <Download className="mr-2 h-4 w-4" /> Download Global Template
+                        </Button>
+                        <Button variant="outline" onClick={() => setIsGlobalUploadOpen(false)}>Cancel</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={isUploadResultOpen} onOpenChange={setIsUploadResultOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
