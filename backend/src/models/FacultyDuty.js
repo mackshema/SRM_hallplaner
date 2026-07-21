@@ -8,4 +8,9 @@ const FacultyDutySchema = new mongoose.Schema({
     examTime: { type: String, required: true }
 }, { timestamps: true });
 
+FacultyDutySchema.index(
+    { facultyId: 1, examDate: 1, examSession: 1 },
+    { unique: true }
+);
+
 export default mongoose.model("FacultyDuty", FacultyDutySchema);

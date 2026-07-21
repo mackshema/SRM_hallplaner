@@ -46,6 +46,7 @@ export function getCurrentUser(): User | null {
 export function logout(): void {
   currentUser = null;
   localStorage.removeItem('currentUser');
+  localStorage.removeItem('token');
 }
 
 export function isAuthenticated(): boolean {

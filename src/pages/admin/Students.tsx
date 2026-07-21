@@ -28,6 +28,7 @@ interface Student {
     program?: string;
     degree?: string; // Corresponds to Level/Year
     department?: string;
+    plainPassword?: string;
 }
 
 interface AcademicStructure {
@@ -788,19 +789,20 @@ const StudentsManagement = () => {
                                             <TableHead>Roll Number</TableHead>
                                             <TableHead>Name</TableHead>
                                             <TableHead>Email Address</TableHead>
+                                            <TableHead>Password</TableHead>
                                             <TableHead className="text-right">Actions</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {isLoading ? (
                                             <TableRow>
-                                                <TableCell colSpan={5} className="h-24 text-center">
+                                                <TableCell colSpan={6} className="h-24 text-center">
                                                     <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
                                                 </TableCell>
                                             </TableRow>
                                         ) : filteredStudents.length === 0 ? (
                                             <TableRow>
-                                                <TableCell colSpan={5} className="h-32 text-center text-slate-500">
+                                                <TableCell colSpan={6} className="h-32 text-center text-slate-500">
                                                     No students found in {selectedDepartment}.
                                                 </TableCell>
                                             </TableRow>
@@ -816,6 +818,7 @@ const StudentsManagement = () => {
                                                     <TableCell className="font-medium">{student.username}</TableCell>
                                                     <TableCell>{student.name}</TableCell>
                                                     <TableCell className="text-slate-600">{student.email || <span className="text-slate-400 italic">Not Provided</span>}</TableCell>
+                                                    <TableCell className="font-mono text-sm text-blue-600 bg-blue-50/30">{student.plainPassword || "student123"}</TableCell>
                                                     <TableCell className="text-right">
                                                         <div className="flex justify-end gap-2">
                                                             <Button variant="ghost" size="icon" onClick={() => openEditModal(student)}>

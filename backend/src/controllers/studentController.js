@@ -1,5 +1,6 @@
 import SeatAssignment from "../models/SeatAssignment.js";
 import ExamSession from "../models/ExamSession.js";
+import AnnaSeating from "../models/AnnaSeating.js";
 import Hall from "../models/Hall.js";
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
@@ -27,32 +28,77 @@ export const getStudentExamDetails = async (req, res) => {
             return res.status(400).json({ message: "Roll number is required" });
         }
 
-        const seats = await SeatAssignment.find({ studentRollNumber: rollNumber })
+        const normalizeRoll = (roll) => {
+            if (!roll || typeof roll !== 'string') return null;
+            return roll.trim().toUpperCase();
+        };
+
+        const normalizedRoll = normalizeRoll(rollNumber);
+        if (!normalizedRoll) {
+            return res.status(400).json({ message: 'Invalid roll number.' });
+        }
+        const results = [];
+
+        // 1. FETCH INTERNAL EXAM ASSIGNMENTS
+        const internalSeats = await SeatAssignment.find({ 
+            studentRollNumber: normalizedRoll 
+        })
             .populate('examSessionId')
             .populate('hallId');
 
-        if (!seats || seats.length === 0) {
-            return res.status(404).json({ message: "No Exam Assignment Found. Please contact Examination Cell." });
+        if (internalSeats && internalSeats.length > 0) {
+            const finalizedInternal = internalSeats.filter(seat => 
+                seat.examSessionId && 
+                seat.examSessionId.status === "FINAL" && 
+                seat.examSessionId.isPublished === true
+            );
+
+            finalizedInternal.forEach(seat => {
+                const rowLabel = seat.isExtraBench ? "Extra Bench" : `Row ${seat.row}`;
+                results.push({
+                    hall: seat.hallId ? seat.hallId.name : "N/A",
+                    floor: seat.hallId ? seat.hallId.floor : "N/A",
+                    date: seat.examSessionId.examDate,
+                    session: seat.examSessionId.examSession,
+                    time: seat.examSessionId.examTime,
+                    rollNumber: seat.studentRollNumber,
+                    seatPosition: `${rowLabel} - Column ${seat.column} - Seat ${seat.benchPosition}`,
+                    type: "Internal"
+                });
+            });
         }
 
-        const finalizedExams = seats.filter(seat => seat.examSessionId && seat.examSessionId.status === "FINAL" && seat.examSessionId.isPublished === true);
-
-        if (finalizedExams.length === 0) {
-            return res.status(404).json({ message: "No published exam plan found for this roll number." });
-        }
-
-        const results = finalizedExams.map(seat => {
-            const rowLabel = seat.isExtraBench ? "Extra Bench" : `Row ${seat.row}`;
-            return {
-                hall: seat.hallId ? seat.hallId.name : "N/A",
-                floor: seat.hallId ? seat.hallId.floor : "N/A",
-                date: seat.examSessionId.examDate,
-                session: seat.examSessionId.examSession,
-                time: seat.examSessionId.examTime,
-                rollNumber: seat.studentRollNumber,
-                seatPosition: `${rowLabel} - Column ${seat.column} - Seat ${seat.benchPosition}`
-            };
+        // 2. FETCH ANNA UNIVERSITY ASSIGNMENTS
+        const annaPlans = await AnnaSeating.find({ 
+            isPublished: true, 
+            status: "FINAL",
+            "assignments.rollNumber": normalizedRoll
         });
+
+        if (annaPlans && annaPlans.length > 0) {
+            annaPlans.forEach(plan => {
+                const myAssignment = plan.assignments.find(a => 
+                    a.rollNumber.toUpperCase() === normalizedRoll
+                );
+                
+                if (myAssignment) {
+                    results.push({
+                        hall: myAssignment.hallName || "N/A",
+                        floor: "N/A", // Anna University seating doesn't always store floor in assignment
+                        date: plan.examDate,
+                        session: plan.session,
+                        time: "09:30 AM", // Standard Anna University time if not specified
+                        rollNumber: myAssignment.rollNumber,
+                        seatPosition: `Row ${myAssignment.row} - Column ${myAssignment.column} - Seat ${myAssignment.benchPosition}`,
+                        type: "Anna University"
+                    });
+                }
+            });
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({ message: "No published exam assignment found for this roll number. Please contact Examination Cell." });
+        }
 
         res.json(results);
 
@@ -74,8 +120,10 @@ export const createStudentAccount = async (req, res) => {
             return res.status(400).json({ message: "Name, roll number, and password are required" });
         }
 
+        const normalizedRoll = rollNumber.trim().toUpperCase();
+
         // Check if student already exists
-        const existingStudent = await User.findOne({ username: rollNumber });
+        const existingStudent = await User.findOne({ username: normalizedRoll });
         if (existingStudent) {
             return res.status(400).json({ message: "Student account already exists for this roll number." });
         }
@@ -86,7 +134,7 @@ export const createStudentAccount = async (req, res) => {
 
         const student = await User.create({
             name,
-            username: rollNumber,
+            username: normalizedRoll,
             password: hashedPassword,
             email: email || "",
             role: "student",
@@ -164,7 +212,7 @@ export const changeStudentPassword = async (req, res) => {
  */
 export const getAllStudents = async (req, res) => {
     try {
-        const students = await User.find({ role: "student" }).select('-password');
+        const students = await User.find({ role: "student" }).select('-password -plainPassword');
         res.json(students);
     } catch (err) {
         console.error("Error fetching students:", err);
@@ -187,7 +235,7 @@ export const updateStudentAccount = async (req, res) => {
         }
 
         student.name = name || student.name;
-        student.username = rollNumber || student.username;
+        student.username = rollNumber ? rollNumber.trim().toUpperCase() : student.username;
         student.email = email !== undefined ? email : student.email;
         if (program !== undefined) student.program = program;
         if (degree !== undefined) student.degree = degree;
@@ -209,7 +257,16 @@ export const updateStudentAccount = async (req, res) => {
             }
         }
 
-        res.json({ message: "Student updated successfully", student });
+        const studentResponse = {
+            _id: student._id,
+            name: student.name,
+            username: student.username,
+            email: student.email,
+            program: student.program,
+            degree: student.degree,
+            department: student.department
+        };
+        res.json({ message: "Student updated successfully", student: studentResponse });
     } catch (err) {
         console.error("Error updating student:", err);
         res.status(500).json({ message: "Internal server error" });
@@ -234,7 +291,8 @@ export const bulkCreateStudents = async (req, res) => {
 
         for (const input of students) {
             try {
-                const existing = await User.findOne({ username: input.rollNumber });
+                const normalizedRoll = input.rollNumber.trim().toUpperCase();
+                const existing = await User.findOne({ username: normalizedRoll });
                 if (existing) {
                     skippedStudents.push({ ...input, reason: "Roll number already exists" });
                     continue;
@@ -244,7 +302,7 @@ export const bulkCreateStudents = async (req, res) => {
                 
                 const student = await User.create({
                     name: input.name,
-                    username: input.rollNumber,
+                    username: normalizedRoll,
                     password: hashedPassword,
                     email: input.email || "",
                     role: "student",

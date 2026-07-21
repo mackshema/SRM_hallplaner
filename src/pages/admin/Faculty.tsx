@@ -57,12 +57,13 @@ const FacultyManagement = () => {
     institutionAffiliation: "",
     examCellName: "",
     academicYear: "",
-    examName: ""
+    examName: "",
+    leftLogo: "",
+    rightLogo: ""
   });
 
-  // Session State
-  const [examSessions, setExamSessions] = useState<ExamSession[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
+  // Fetch All Finalized Duties for Summary
+  const [allFinalizedDuties, setAllFinalizedDuties] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -76,15 +77,11 @@ const FacultyManagement = () => {
           setSettings(settingsData);
         }
 
-        // Fetch Sessions
-        const sessionsRes = await fetch("http://localhost:5000/api/exam-sessions");
-        if (sessionsRes.ok) {
-          const sessionsData = await sessionsRes.json();
-          setExamSessions(sessionsData);
-          // Default to latest session
-          if (sessionsData.length > 0) {
-            setSelectedSessionId(prev => prev || sessionsData[sessionsData.length - 1]._id);
-          }
+        // Fetch All Finalized Duties across all sessions
+        const dutiesRes = await fetch("http://localhost:5000/api/seating/duties/all"); // Fetch all duties
+        if (dutiesRes.ok) {
+           const dutiesData = await dutiesRes.json();
+           setAllFinalizedDuties(dutiesData);
         }
 
       } catch (error) {
@@ -97,31 +94,13 @@ const FacultyManagement = () => {
     fetchInitialData();
   }, []);
 
-  // Fetch Halls when session changes
-  useEffect(() => {
-    const fetchHalls = async () => {
-      // If we don't have a session ID yet (and sessions exist), wait. 
-      // But if there are no sessions, we might still want to fetch halls (default/raw).
-      // For now, let's fetch always, adding param if exists.
-
-      try {
-        let url = "http://localhost:5000/api/halls";
-        if (selectedSessionId) {
-          url += `?examSessionId=${selectedSessionId}`;
-        }
-
-        const res = await fetch(url);
-        if (res.ok) {
-          const hallsData = await res.json();
-          setHalls(hallsData);
-        }
-      } catch (error) {
-        console.error("Error fetching halls:", error);
-      }
-    };
-
-    fetchHalls();
-  }, [selectedSessionId]);
+  // Function to get ALL assigned halls for a faculty across all dates
+  const getAllAssignedHalls = (member: User) => {
+    const mId = String(member._id || member.id);
+    return allFinalizedDuties.filter(duty => 
+      String(duty.facultyId._id || duty.facultyId) === mId
+    );
+  };
 
   // Function to get assigned halls for each faculty member
   const getAssignedHalls = (member: User): Hall[] => {
@@ -279,6 +258,19 @@ const FacultyManagement = () => {
       doc.setFontSize(14);
       doc.text(settings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY", centerX, 22, { align: "center" });
 
+      if (settings.leftLogo) {
+        try {
+          const format = settings.leftLogo.substring(settings.leftLogo.indexOf('/') + 1, settings.leftLogo.indexOf(';')).toUpperCase();
+          doc.addImage(settings.leftLogo, format, 14, 8, 20, 20);
+        } catch (e) { console.error("Logo error", e); }
+      }
+      if (settings.rightLogo) {
+        try {
+          const format = settings.rightLogo.substring(settings.rightLogo.indexOf('/') + 1, settings.rightLogo.indexOf(';')).toUpperCase();
+          doc.addImage(settings.rightLogo, format, pageWidth - 34, 8, 20, 20);
+        } catch (e) { console.error("Logo error", e); }
+      }
+
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       doc.text(settings.institutionAffiliation || "Approved by AICTE, New Delhi | Affiliated to Anna University, Chennai", centerX, 28, { align: "center" });
@@ -339,11 +331,8 @@ const FacultyManagement = () => {
     }
   };
 
-  const currentSession = examSessions.find(s => s._id === selectedSessionId);
-
-  const isFacultySelectedForSession = (memberId: string) => {
-    if (!currentSession || !currentSession.selectedFaculty) return false;
-    return currentSession.selectedFaculty.includes(memberId);
+  const isFacultySelected = (member: User) => {
+    return member.isSelectedForGeneration;
   };
 
   const filteredFaculty = faculty.filter(f =>
@@ -351,56 +340,44 @@ const FacultyManagement = () => {
     (f.department && f.department.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const allSelected = filteredFaculty.length > 0 && filteredFaculty.every(f => isFacultySelectedForSession(f._id || ""));
+  const allSelected = filteredFaculty.length > 0 && filteredFaculty.every(f => f.isSelectedForGeneration);
 
   const toggleSelection = async (member: User) => {
     try {
-      const fId = String(member._id || member.id);
-      if (!fId || fId === "undefined" || !selectedSessionId || !currentSession) return;
+      const fId = member._id || member.id;
+      if (!fId) return;
 
-      const isSelected = isFacultySelectedForSession(fId);
-      let newSelectedFaculty = currentSession.selectedFaculty || [];
-
-      if (isSelected) {
-        newSelectedFaculty = newSelectedFaculty.filter(id => id !== fId);
-      } else {
-        newSelectedFaculty = [...newSelectedFaculty, fId];
-      }
-
+      const newStatus = !member.isSelectedForGeneration;
+      
       // Optimistic update
-      setExamSessions(prev => prev.map(s => s._id === selectedSessionId ? { ...s, selectedFaculty: newSelectedFaculty } : s));
+      setFaculty(prev => prev.map(f => (f._id === fId || f.id === fId) ? { ...f, isSelectedForGeneration: newStatus } : f));
 
-      await db.updateExamSession(selectedSessionId, { selectedFaculty: newSelectedFaculty });
+      await db.updateFaculty(fId, { isSelectedForGeneration: newStatus });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
-      toast({ title: "Failed to update selection", description: errorMessage, variant: "destructive" });
+      toast({ title: "Failed to update selection", variant: "destructive" });
     }
   };
 
   const toggleAll = async () => {
     try {
-      if (!selectedSessionId || !currentSession) return;
       const newStatus = !allSelected;
+      
+      // Optimistic
+      setFaculty(prev => prev.map(f => {
+        if (filteredFaculty.some(ff => ff._id === f._id || ff.id === f.id)) {
+          return { ...f, isSelectedForGeneration: newStatus };
+        }
+        return f;
+      }));
 
-      let newSelectedFaculty = currentSession.selectedFaculty || [];
-      const filteredIds = filteredFaculty.map(f => String(f._id || f.id)).filter(Boolean);
-
-      if (newStatus) {
-        // Add all filtered that aren't already there
-        const toAdd = filteredIds.filter(id => !newSelectedFaculty.includes(id));
-        newSelectedFaculty = [...newSelectedFaculty, ...toAdd];
-      } else {
-        // Remove all filtered from selection
-        newSelectedFaculty = newSelectedFaculty.filter(id => !filteredIds.includes(id));
+      // In a real app, I'd suggest a bulk update endpoint, but let's loop for now to match current patterns
+      for (const ff of filteredFaculty) {
+        const id = ff._id || ff.id;
+        if (id) await db.updateFaculty(id, { isSelectedForGeneration: newStatus });
       }
 
-      // Optimistic
-      setExamSessions(prev => prev.map(s => s._id === selectedSessionId ? { ...s, selectedFaculty: newSelectedFaculty } : s));
-
-      await db.updateExamSession(selectedSessionId, { selectedFaculty: newSelectedFaculty });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "An error occurred.";
-      toast({ title: "Failed to update all selections", description: errorMessage, variant: "destructive" });
+      toast({ title: "Failed to update all selections", variant: "destructive" });
     }
   };
 
@@ -413,36 +390,10 @@ const FacultyManagement = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Faculty Management</h1>
-          <p className="text-gray-600">Select faculty for automated exam assignment and view their duties</p>
+          <p className="text-gray-600">Review rules, methodology, and assigned duties for all faculty members</p>
         </div>
 
         <div className="flex gap-2">
-          {/* SESSION SELECTOR */}
-          <div className="flex flex-col items-end mr-4">
-            <select
-              className="border p-2 rounded-md bg-white text-sm min-w-[200px]"
-              value={selectedSessionId}
-              onChange={(e) => setSelectedSessionId(e.target.value)}
-            >
-              <option value="" disabled>Select Session Context</option>
-              {examSessions.map(s => (
-                <option key={s._id} value={s._id}>
-                  {s.examDate} ({s.examSession}) - {s.status}
-                </option>
-              ))}
-            </select>
-            {(() => {
-              const selected = examSessions.find(s => s._id === selectedSessionId);
-              if (selected) {
-                return (
-                  <span className={`text-xs mt-1 px-2 py-0.5 rounded-full ${selected.status === 'FINAL' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                    {selected.status === 'FINAL' ? 'Locked Plan' : 'Draft Mode'}
-                  </span>
-                );
-              }
-              return null;
-            })()}
-          </div>
 
           <Button variant="outline" onClick={exportFacultyHallAllocation}>
             <FileDown className="mr-2 h-4 w-4" />
@@ -646,24 +597,24 @@ const FacultyManagement = () => {
                       </p>
                     </div>
                   </div>
-
-                  <div>
-                    <Label className="text-muted-foreground mb-2 block">Assigned Halls</Label>
+                   <div>
+                    <Label className="text-muted-foreground mb-2 block">Assigned Halls History</Label>
                     <div className="bg-slate-50 p-3 rounded-md border text-sm max-h-40 overflow-y-auto">
-                      {getAssignedHalls(selectedFaculty).length > 0 ? (
+                      {getAllAssignedHalls(selectedFaculty).length > 0 ? (
                         <ul className="list-disc pl-5 space-y-1">
-                          {getAssignedHalls(selectedFaculty).map(h => (
-                            <li key={h._id}>
-                              <span className="font-semibold">{h.name}</span>
-                              {h.examDate && <span className="text-xs text-muted-foreground ml-2">({h.examDate} - {h.examSession})</span>}
+                          {getAllAssignedHalls(selectedFaculty).map((duty, idx) => (
+                            <li key={idx}>
+                              <span className="font-semibold">{duty.hallId?.name || "Unknown Hall"}</span>
+                              <span className="text-xs text-muted-foreground ml-2">({duty.examDate} - {duty.examSession})</span>
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <p className="text-muted-foreground italic">No halls assigned</p>
+                        <p className="text-muted-foreground italic">No duties recorded</p>
                       )}
                     </div>
                   </div>
+
                 </div>
               )}
               <DialogFooter>
@@ -710,14 +661,14 @@ const FacultyManagement = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredFaculty.map(member => (
+               filteredFaculty.map(member => (
                 <TableRow
                   key={member.id || member._id}
-                  className={`transition-opacity duration-200 ${!isFacultySelectedForSession(String(member._id || member.id)) ? "opacity-50 grayscale bg-gray-50" : ""}`}
+                  className={`transition-opacity duration-200 ${!member.isSelectedForGeneration ? "opacity-50 grayscale bg-gray-50" : ""}`}
                 >
-                  <TableCell>
+                   <TableCell>
                     <Checkbox
-                      checked={isFacultySelectedForSession(String(member._id || member.id))}
+                      checked={!!member.isSelectedForGeneration}
                       onCheckedChange={() => toggleSelection(member)}
                     />
                   </TableCell>
@@ -725,11 +676,14 @@ const FacultyManagement = () => {
                   <TableCell>{member.designation || "N/A"}</TableCell>
                   <TableCell>{member.department || "N/A"}</TableCell>
                   <TableCell>{member.username}</TableCell>
-                  <TableCell>
-                    {getAssignedHalls(member).length > 0 ? (
-                      <ul className="list-disc pl-5">
-                        {getAssignedHalls(member).map(hall => (
-                          <li key={hall._id}>{hall.name}</li>
+                   <TableCell>
+                    {getAllAssignedHalls(member).length > 0 ? (
+                      <ul className="text-xs space-y-1">
+                        {getAllAssignedHalls(member).map((duty, idx) => (
+                          <li key={idx} className="whitespace-nowrap">
+                            <span className="font-semibold">{duty.hallId?.name || "???"}</span>
+                            <span className="text-gray-500 ml-1">({duty.examDate} {duty.examSession})</span>
+                          </li>
                         ))}
                       </ul>
                     ) : (
@@ -770,12 +724,34 @@ const FacultyManagement = () => {
         </Table>
       </div>
 
-      <div className="p-4 bg-gray-50 rounded-lg">
-        <h3 className="font-semibold mb-2">Note:</h3>
-        <p className="text-gray-600">
-          Only checked faculty members will be considered for automatic exam duty allocation.
-          The automation system enforces a maximum of 4 duties per week and prevents back-to-back session assignments.
-        </p>
+       <div className="p-5 bg-blue-50 rounded-xl border border-blue-100 shadow-sm">
+        <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+          <span className="bg-blue-600 text-white p-1 rounded-md text-xs">ℹ️</span>
+          Faculty Allocation Methodology & Rules
+        </h3>
+        <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm text-blue-800">
+          <li className="flex gap-2">
+            <strong>1. Internal Exams Only:</strong> Auto-assignment is strictly and only for Internal exams. Anna University exams require manual faculty assignment.
+          </li>
+          <li className="flex gap-2">
+            <strong>2. No Continuous Participation:</strong> A faculty member assigned to a Forenoon (FN) session is excluded from the subsequent Afternoon (AN) session to prevent fatigue.
+          </li>
+          <li className="flex gap-2">
+            <strong>3. Department Diversity:</strong> A maximum of 2 faculty members from the same department can be assigned to a single hall.
+          </li>
+          <li className="flex gap-2">
+            <strong>4. Hard Conflict Check:</strong> The system ensures a faculty member is never assigned to two different halls in the same session.
+          </li>
+          <li className="flex gap-2">
+            <strong>5. Weekly Workload:</strong> Each faculty member is capped at a maximum of 4 exam duties per rolling 7-day period.
+          </li>
+          <li className="flex gap-2">
+            <strong>6. Mandatory Rest:</strong> The system tracks last duty dates to prioritize faculty who haven't served recently.
+          </li>
+        </ul>
+        <div className="mt-4 pt-4 border-t border-blue-200 text-xs text-blue-600 italic">
+          * Checking the box next to a faculty name makes them eligible for the automatic selection algorithm for upcoming Internal Exams.
+        </div>
       </div>
     </div>
   );

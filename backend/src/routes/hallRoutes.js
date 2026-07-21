@@ -1,4 +1,5 @@
 import express from "express";
+import { requireAdmin } from "../middleware/authMiddleware.js";
 import {
     createHall,
     getAllHalls,
@@ -6,12 +7,15 @@ import {
     deleteHall,
     assignFacultyToHall,
     updateHall,
-    getAllExamDates
+    getAllExamDates,
+    bulkCreateHalls
 } from "../controllers/hallController.js";
 
 const router = express.Router();
+router.use(requireAdmin);
 
 router.post("/", createHall);
+router.post("/bulk-create", bulkCreateHalls);
 router.get("/all-exam-dates", getAllExamDates);
 router.get("/", getAllHalls);
 router.get("/:id", getHallById);

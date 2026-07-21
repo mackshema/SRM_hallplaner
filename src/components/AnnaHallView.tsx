@@ -4,9 +4,10 @@ import { Hall } from "@/lib/db";
 interface AnnaHallViewProps {
   hallId: string;
   assignments: any[];
+  facultyNames?: string[];
 }
 
-const AnnaHallView = ({ hallId, assignments }: AnnaHallViewProps) => {
+const AnnaHallView = ({ hallId, assignments, facultyNames }: AnnaHallViewProps) => {
   const [hall, setHall] = useState<Hall | null>(null);
 
   useEffect(() => {
@@ -40,6 +41,11 @@ const AnnaHallView = ({ hallId, assignments }: AnnaHallViewProps) => {
         <div>
            <h3 className="font-bold text-2xl text-slate-800">{hall.name} - View Layout</h3>
            <p className="text-slate-500 text-sm mt-1">Official Anna University Seating Configuration</p>
+           {facultyNames && facultyNames.length > 0 && (
+             <p className="text-indigo-700 font-semibold text-sm mt-2">
+               Assigned Invigilator(s): {facultyNames.join(", ")}
+             </p>
+           )}
         </div>
         <div className="bg-white border rounded-lg px-4 py-2 text-right shadow-sm">
            <p className="font-semibold text-slate-700 whitespace-nowrap">{hall.rows} Rows × {hall.columns} Columns</p>

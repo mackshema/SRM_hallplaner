@@ -1,4 +1,5 @@
 import express from "express";
+import { requireAdmin, requireFaculty } from "../middleware/authMiddleware.js";
 import { 
     createDelegationRequest, 
     hodApprove, 
@@ -10,11 +11,11 @@ import {
 
 const router = express.Router();
 
-router.post("/request", createDelegationRequest);
-router.get("/:id/hod-approve", hodApprove);
-router.get("/:id/hod-reject", hodReject);
-router.get("/:id/faculty-accept", facultyAccept);
-router.get("/:id/faculty-decline", facultyDecline);
-router.get("/requests/:facultyId", getDelegationRequests);
+router.post("/request", requireFaculty, createDelegationRequest);
+router.get("/:id/hod-approve", requireAdmin, hodApprove);
+router.get("/:id/hod-reject", requireAdmin, hodReject);
+router.get("/:id/faculty-accept", requireFaculty, facultyAccept);
+router.get("/:id/faculty-decline", requireFaculty, facultyDecline);
+router.get("/requests/:facultyId", requireFaculty, getDelegationRequests);
 
 export default router;

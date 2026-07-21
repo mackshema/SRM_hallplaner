@@ -1,53 +1,65 @@
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
-// @desc    Login user & get token (Mock token for now)
+// @desc    Login user & get token
 // @route   POST /api/auth/login
 export const loginUser = async (req, res) => {
     const { username, password } = req.body;
 
     try {
-        const user = await User.findOne({ username });
+        const normalizedUsername = username?.trim().toUpperCase();
+        const user = await User.findOne({ username: normalizedUsername })
+            .collation({ locale: 'en', strength: 2 });
 
         if (user) {
-            let isMatch = false;
-            if (user.role === 'student') {
-                isMatch = await bcrypt.compare(password, user.password);
-            } else {
-                isMatch = (user.password === password);
-            }
-
+            const isMatch = await bcrypt.compare(password, user.password);
             if (isMatch) {
-                sendLoginSuccess(user, res);
+                const token = jwt.sign(
+                    {
+                        id: user._id.toString(),
+                        role: user.role,
+                        username: user.username,
+                        name: user.name
+                    },
+                    process.env.JWT_SECRET,
+                    { expiresIn: '10h' }
+                );
+
+                return res.json({
+                    token,
+                    user: {
+                        id: user._id,
+                        name: user.name,
+                        username: user.username,
+                        role: user.role,
+                        department: user.department
+                    }
+                });
             } else {
-                res.status(401).json({ message: "Invalid username or password" });
+                return res.status(401).json({ message: "Invalid username or password" });
             }
-            return;
         } else {
-            res.status(401).json({ message: "Invalid username or password" });
+            return res.status(401).json({ message: "Invalid username or password" });
         }
-
-        // Helper function inside to keep response formatting DRY
-        function sendLoginSuccess(u, response) {
-            response.json({
-                id: u.id || u._id,
-                _id: u._id,
-                name: u.name,
-                username: u.username,
-                role: u.role,
-                department: u.department,
-            });
-        }
-
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        return res.status(500).json({ message: error.message });
     }
 };
 
 // @desc    Seed initial users
 // @route   POST /api/auth/seed
 export const seedUsers = async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ message: 'Seeding disabled in production.' });
+    }
+
     try {
+        const existingAdmin = await User.findOne({ role: 'admin' });
+        if (existingAdmin) {
+            return res.status(200).json({ message: 'Already seeded.' });
+        }
+
         const count = await User.countDocuments();
         if (count > 0) {
             return res.json({ message: "Users already seeded" });
@@ -57,8 +69,18 @@ export const seedUsers = async (req, res) => {
         const hashedStudentPassword = await bcrypt.hash("student123", salt);
 
         const users = [
-            { name: "Admin User", username: "SRM@Admin", password: "Admin@12345678", role: "admin" },
-            { name: "Faculty User", username: "faculty@1234", password: "srm@123456789", role: "faculty" }
+            { 
+                name: "Admin User", 
+                username: process.env.SEED_ADMIN_USERNAME, 
+                password: await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD, 10), 
+                role: "admin" 
+            },
+            { 
+                name: "Faculty User", 
+                username: "faculty@1234", 
+                password: await bcrypt.hash("srm@123456789", 10), 
+                role: "faculty" 
+            }
         ];
 
         await User.insertMany(users);
@@ -66,4 +88,4 @@ export const seedUsers = async (req, res) => {
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
-}
+};

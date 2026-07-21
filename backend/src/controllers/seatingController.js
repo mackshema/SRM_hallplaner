@@ -6,6 +6,17 @@ const Faculty = User; // Alias for readability in this file
 // import Faculty from "../models/Faculty.js"; // REPLACED
 import FacultyDuty from "../models/FacultyDuty.js";
 import SeatingPlan from "../models/SeatingPlan.js";
+import InternalExamData from "../models/InternalExamData.js"; // AL-01
+
+const getDateDaysAgo = (dateStr, days) => {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split('T')[0]; // YYYY-MM-DD
+};
+
+const getPrevSession = (session) =>
+  session === 'AN' ? 'FN' : null; // FN→AN is same day, AN→next day FN
+
 
 /* ===============================
    SAVE SEATING PLAN (ADMIN)
@@ -211,13 +222,34 @@ export const generateSeatingPlan = async (req, res) => {
       return res.status(400).json({ message: "No students found in the database. Please add students first." });
     }
 
+    // AL-01: Build name snapshot map (rollNumber → name)
+    const nameMap = {};
+    allStudents.forEach(s => { nameMap[s.username] = s.name || ''; });
+
+    // AL-01: Build subject snapshot map (rollNumber → subjectCode) from InternalExamData
+    const internalData = await InternalExamData.find({}).lean();
+    const subjectMap = {};
+    internalData.forEach(d => {
+      if (d.rollNumber) subjectMap[d.rollNumber] = d.subjectCode || null;
+    });
+
+    const generationWarnings = []; // AL-03: silent warning collector
     const deptMap = {};
-    allStudents.forEach(student => {
-        const dept = student.department || "Unknown";
+    allStudents.forEach(s => {
+        if (!s.department) {
+            console.warn('Student missing department, excluded from seating:', s.username);
+            generationWarnings.push({
+                type: 'STUDENT_NO_DEPARTMENT',
+                rollNumber: s.username,
+                message: `Student ${s.name} (${s.username}) excluded — missing department field`
+            });
+            return;
+        }
+        const dept = s.department;
         if (!deptMap[dept]) {
             deptMap[dept] = [];
         }
-        deptMap[dept].push(student.username);
+        deptMap[dept].push(s.username);
     });
 
     const departments = Object.keys(deptMap).map(deptName => ({
@@ -260,6 +292,12 @@ export const generateSeatingPlan = async (req, res) => {
       });
     });
 
+    // AL-06: O(1) pointer indices — replaces O(N) Array.shift() on deptQueues
+    // Each entry tracks how many students have been consumed from that dept queue.
+    // Reads use deptQueues[d][deptPtrs[d]] and increment; arrays are never mutated.
+    const deptPtrs = {};
+    Object.keys(deptQueues).forEach(dept => { deptPtrs[dept] = 0; });
+
     // Add manual roll numbers (Priority)
     manualSet.forEach((manualRoll) => {
       const student = allStudents.find(s => s.username === manualRoll);
@@ -290,6 +328,7 @@ export const generateSeatingPlan = async (req, res) => {
     // 1.4: Hall-by-Hall Filling
     const assignments = [];
     let deptPtr = 0;
+    // generationWarnings is already declared above
 
     const isPairBlocked = (dId1, dId2) => {
       if (!session.blockedCombinations) return false;
@@ -307,7 +346,7 @@ export const generateSeatingPlan = async (req, res) => {
       let checked = 0;
       while (active.length < n && checked < shuffledDeptIds.length) {
         const dId = shuffledDeptIds[(deptPtr + checked) % shuffledDeptIds.length];
-        if (deptQueues[dId] && deptQueues[dId].length > 0) {
+        if (deptQueues[dId] && deptPtrs[dId] < deptQueues[dId].length) {
           if (!active.includes(dId)) {
             let conflicts = false;
             for (const existingId of active) {
@@ -345,9 +384,10 @@ export const generateSeatingPlan = async (req, res) => {
 
       activeDepts.forEach((dId) => {
         const queue = deptQueues[dId];
-        const takeCount = Math.min(targetPerDept, queue.length);
+        const remaining = queue.length - deptPtrs[dId]; // AL-06: available count
+        const takeCount = Math.min(targetPerDept, remaining);
         for (let k = 0; k < takeCount; k++) {
-          hallBatch.get(dId).push(queue.shift());
+          hallBatch.get(dId).push(queue[deptPtrs[dId]++]); // AL-06: O(1) read
           seatsFilled++;
         }
       });
@@ -356,9 +396,9 @@ export const generateSeatingPlan = async (req, res) => {
       let safetyCheck = 0;
       while (seatsFilled < hallCapacity && safetyCheck < hallCapacity * 2) {
         safetyCheck++;
-        let candidates = activeDepts.filter((d) => deptQueues[d].length > 0);
+        let candidates = activeDepts.filter((d) => deptPtrs[d] < deptQueues[d].length); // AL-06
         if (candidates.length === 0) {
-          candidates = shuffledDeptIds.filter((d) => deptQueues[d].length > 0);
+          candidates = shuffledDeptIds.filter((d) => deptPtrs[d] < deptQueues[d].length); // AL-06
 
           const currentHBatchIds = Array.from(hallBatch.keys());
           candidates = candidates.filter(d => {
@@ -375,7 +415,7 @@ export const generateSeatingPlan = async (req, res) => {
           });
         }
         const dId = candidates[seatsFilled % candidates.length];
-        hallBatch.get(dId).push(deptQueues[dId].shift());
+        hallBatch.get(dId).push(deptQueues[dId][deptPtrs[dId]++]); // AL-06: O(1) read
         seatsFilled++;
       }
 
@@ -394,7 +434,13 @@ export const generateSeatingPlan = async (req, res) => {
       const grid = Array(hall.rows + 1).fill(null)
         .map(() => Array(hall.columns * hall.seatsPerBench + 1).fill(null));
 
-      const tryPlaceHere = (dId, gridX, gridY, benchPos1Dept, seat) => {
+      // AL-05: Parallel subject-code grid for Rule 7 (subject separation)
+      // Tracks the subjectCode placed at each [row][col] position.
+      // Null means empty or no subject data available.
+      const subjectGrid = Array(hall.rows + 1).fill(null)
+        .map(() => Array(hall.columns * hall.seatsPerBench + 1).fill(null));
+
+      const tryPlaceHere = (dId, gridX, gridY, benchPos1Dept, seat, candidateSubjectCode) => {
         // Rule 1 – bench-mate: seat-2 dept ≠ seat-1 dept on the same bench
         if (seat > 1 && benchPos1Dept === dId) return false;
         // Rule 2 – left neighbor
@@ -414,14 +460,31 @@ export const generateSeatingPlan = async (req, res) => {
             if (isPairBlocked(dId, nDept)) return false;
           }
         }
+        // Rule 7 – AL-05: subject-code separation
+        // If candidate has a known subject code, reject placement if any direct
+        // neighbor (L/R/U/D) already holds the SAME subject code.
+        // Null-safe: skipped when subjectCode is unavailable (legacy sessions).
+        if (candidateSubjectCode) {
+          const subjectNeighbors = [
+            subjectGrid[gridY]?.[gridX - 1],      // left
+            subjectGrid[gridY]?.[gridX + 1],      // right
+            subjectGrid[gridY - 1]?.[gridX],      // top
+            subjectGrid[gridY + 1]?.[gridX],      // bottom
+          ];
+          for (const ns of subjectNeighbors) {
+            if (ns && ns === candidateSubjectCode) return false;
+          }
+        }
         return true;
       };
 
       const getStudentFromDeptSC = (dId) => {
         const bQueue = hallBatch.get(dId);
-        if (bQueue && bQueue.length > 0) return bQueue.shift();
-        // Exceptional fill – pull directly from global queue
-        if (deptQueues[dId] && deptQueues[dId].length > 0) return deptQueues[dId].shift();
+        if (bQueue && bQueue.length > 0) return bQueue.shift(); // hallBatch is small; .shift() here is fine
+        // Exceptional fill – pull directly from global queue (AL-06: pointer-based)
+        if (deptQueues[dId] && deptPtrs[dId] < deptQueues[dId].length) {
+          return deptQueues[dId][deptPtrs[dId]++];
+        }
         return null;
       };
 
@@ -444,20 +507,27 @@ export const generateSeatingPlan = async (req, res) => {
 
             // Candidate list: batch depts first, then any globally available dept
             const globalExtras = shuffledDeptIds.filter(
-              d => !batchDeptIds.includes(d) && deptQueues[d].length > 0
+              d => !batchDeptIds.includes(d) && deptPtrs[d] < deptQueues[d].length // AL-06
             );
             const candidateDepts = [...batchDeptIds, ...globalExtras];
 
             for (let attempt = 0; attempt < candidateDepts.length; attempt++) {
               const dId = candidateDepts[attempt];
 
-              if (!tryPlaceHere(dId, gridX, gridY, benchPos1Dept, seat)) continue;
+              // AL-05: peek at the front roll to get its subjectCode for Rule 7
+              // We peek (not pop) so getStudentFromDeptSC still works normally.
+              // AL-06: use pointer to peek at current front of global queue
+              const peekRoll = hallBatch.get(dId)?.[0] ?? deptQueues[dId]?.[deptPtrs[dId]] ?? null;
+              const candidateSubjectCode = peekRoll ? (subjectMap[peekRoll] || null) : null;
+
+              if (!tryPlaceHere(dId, gridX, gridY, benchPos1Dept, seat, candidateSubjectCode)) continue;
 
               const roll = getStudentFromDeptSC(dId);
               if (roll === null) continue;
 
               if (!hallBatch.has(dId)) hallBatch.set(dId, []);
               grid[gridY][gridX] = dId;
+              subjectGrid[gridY][gridX] = subjectMap[roll] || null; // AL-05: record subject for future neighbors
               if (seat === 1) benchPos1Dept = dId;
 
               assignments.push({
@@ -471,6 +541,8 @@ export const generateSeatingPlan = async (req, res) => {
                 examSession,
                 examTime,
                 examSessionId,
+                studentName: nameMap[roll] || '',        // AL-01 snapshot
+                subjectCode: subjectMap[roll] || null,  // AL-01 snapshot
               });
               placed = true;
               break;
@@ -479,6 +551,14 @@ export const generateSeatingPlan = async (req, res) => {
             // If no dept can be placed without violating rules — leave empty
             if (!placed) {
               grid[gridY][gridX] = '__EMPTY__';
+              // AL-03: record the deadlocked seat
+              generationWarnings.push({
+                type: 'SEAT_EMPTY',
+                hall: hall.name,
+                row,
+                col,
+                message: `Seat [${row},${col}] in ${hall.name} could not be filled — constraint deadlock`
+              });
             }
           }
         }
@@ -496,7 +576,7 @@ export const generateSeatingPlan = async (req, res) => {
             let placed = false;
 
             const globalExtras = shuffledDeptIds.filter(
-              d => !batchDeptIds.includes(d) && deptQueues[d].length > 0
+              d => !batchDeptIds.includes(d) && deptPtrs[d] < deptQueues[d].length // AL-06
             );
             const candidateDepts = [...batchDeptIds, ...globalExtras];
 
@@ -524,6 +604,8 @@ export const generateSeatingPlan = async (req, res) => {
                 examTime,
                 examSessionId,
                 isExtraBench: true,
+                studentName: nameMap[roll] || '',        // AL-01 snapshot
+                subjectCode: subjectMap[roll] || null,  // AL-01 snapshot
               });
               placed = true;
               break;
@@ -547,18 +629,12 @@ export const generateSeatingPlan = async (req, res) => {
     // 2.1 Fetch Previous Session to enforce "No Continuous Participation"
     let previousSession = null;
     if (session.examSession === "AN") {
-      previousSession = await ExamSession.findOne({ examDate: session.examDate, examSession: "FN" });
+      previousSession = { examDate: session.examDate, examSession: "FN" };
     } else {
-      previousSession = await ExamSession.findOne({ examDate: { $lt: session.examDate } }).sort({ examDate: -1, examSession: -1 });
-    }
-
-    let previouslyAssignedFacultyIds = [];
-    if (previousSession) {
-      const prevDuties = await FacultyDuty.find({
-        examDate: previousSession.examDate,
-        examSession: previousSession.examSession
-      });
-      previouslyAssignedFacultyIds = prevDuties.map(d => d.facultyId.toString());
+      const prevSessionDoc = await ExamSession.findOne({ examDate: { $lt: session.examDate } }).sort({ examDate: -1, examSession: -1 });
+      if (prevSessionDoc) {
+        previousSession = { examDate: prevSessionDoc.examDate, examSession: prevSessionDoc.examSession };
+      }
     }
 
     // 2.2 Fetch ALL Eligible Faculty
@@ -585,8 +661,39 @@ export const generateSeatingPlan = async (req, res) => {
 
     const allFaculty = await Faculty.find(facultyQuery).lean();
 
-    // 2.3 Get Existing Duties for Constraint Checking
-    const allDuties = await FacultyDuty.find({});
+    // 2.3 Get Existing Duties for Constraint Checking (Optimized: AL-10)
+    const examDateStr = session.examDate;
+    const sevenDaysAgo = getDateDaysAgo(examDateStr, 7);
+
+    // Query recent duties for "no continuous participation" and "weekly duty limit" checks
+    const recentDuties = await FacultyDuty.find({
+      examDate: { $gte: sevenDaysAgo, $lte: examDateStr }
+    }).select('facultyId examDate examSession').lean();
+
+    // Build lookup Set for previous session duties
+    const prevSessionKey = previousSession ? `${previousSession.examDate}_${previousSession.examSession}` : null;
+    const prevSessionFacultySet = new Set(
+      prevSessionKey
+        ? recentDuties
+            .filter(d => `${d.examDate}_${d.examSession}` === prevSessionKey)
+            .map(d => d.facultyId.toString())
+        : []
+    );
+
+    // Hard Constraint lookup: Same Session Duplicate
+    const sameSessionKey = `${examDateStr}_${session.examSession}`;
+    const sameSessionFacultySet = new Set(
+      recentDuties
+        .filter(d => `${d.examDate}_${d.examSession}` === sameSessionKey)
+        .map(d => d.facultyId.toString())
+    );
+
+    // Count duties per faculty in last 7 days for Weekly Limit
+    const weeklyDutyCount = {};
+    recentDuties.forEach(d => {
+      const id = d.facultyId.toString();
+      weeklyDutyCount[id] = (weeklyDutyCount[id] || 0) + 1;
+    });
 
     // Helper to check constraints
     const isFacultyAvailable = (faculty, hall, currentAssignments, examDate) => {
@@ -603,26 +710,18 @@ export const generateSeatingPlan = async (req, res) => {
       }).length;
       if (sameDeptCount >= 2 && !isDemand) return false;
 
-      const fDuties = allDuties.filter(d => d.facultyId.toString() === fId);
-
       // 3. Same Session Duplicate: Cannot be in two places at once (HARD CONSTRAINT)
-      if (fDuties.some(d => d.examDate === examDate && d.examSession === examSession)) return false;
+      if (sameSessionFacultySet.has(fId)) return false;
 
       // 4. No Continuous Participation (Unless Demand)
-      if (previouslyAssignedFacultyIds.includes(fId) && !isDemand) {
+      if (prevSessionFacultySet.has(fId) && !isDemand) {
         return false;
       }
 
       // 5. Weekly Limit: Max 4 duties (User Rule)
       if (!isDemand) {
-        const targetDate = new Date(examDate);
-        const dutiesLastWeek = fDuties.filter(d => {
-          const dDate = new Date(d.examDate);
-          const diffTime = Math.abs(targetDate - dDate);
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          return diffDays <= 7;
-        }).length;
-        if (dutiesLastWeek >= 4) return false;
+        const count = weeklyDutyCount[fId] || 0;
+        if (count >= 4) return false;
       }
 
       return true;
@@ -644,15 +743,26 @@ export const generateSeatingPlan = async (req, res) => {
       [shuffledFaculty[i], shuffledFaculty[j]] = [shuffledFaculty[j], shuffledFaculty[i]];
     }
 
+    // AL-07: collector for session-scoped faculty assignments
+    // Written to ExamSession in one shot after the loop — prevents
+    // concurrent sessions overwriting each other via Hall.facultyAssigned.
+    const sessionFacultyAssignments = [];
+
+    // AL-07 Step 4: clear stale Hall-level data so old UI reads show nothing
+    // (non-blocking — backward compat for any pre-AL-07 Hall reads)
+    const selectedHallIds = orderedHalls.map(h => h._id);
+    await Hall.updateMany(
+      { _id: { $in: selectedHallIds } },
+      { $set: { facultyAssigned: [] } }
+    );
+
     // Only assign faculty to halls that actually received students
     const hallsWithStudents = new Set(assignments.map(a => a.hallId.toString()));
 
     // Iterate Halls — skip empty halls
     for (const hall of orderedHalls) {
       if (!hallsWithStudents.has(hall._id.toString())) {
-        // Clear any stale faculty from a previous run for this now-empty hall
-        await Hall.findByIdAndUpdate(hall._id, { facultyAssigned: [] });
-        continue; // No students → no faculty needed
+        continue; // No students → no faculty needed (Hall already cleared above)
       }
 
       const required = hall.facultyRequired || 1;
@@ -681,32 +791,37 @@ export const generateSeatingPlan = async (req, res) => {
         }
       }
 
-      // Save to Hall (Draft)
-      await Hall.findByIdAndUpdate(hall._id, {
-        facultyAssigned: hallAssignedIds
+      // AL-07: push to session-scoped collector instead of writing to Hall
+      // This prevents concurrent generation runs from overwriting each other.
+      sessionFacultyAssignments.push({
+        hallId: hall._id,
+        facultyIds: hallAssignedIds
       });
     }
 
+    // AL-07: persist all faculty assignments to ExamSession in one atomic write
+    await ExamSession.findByIdAndUpdate(examSessionId, {
+      $set: { facultyAssignments: sessionFacultyAssignments }
+    });
+
     // If there is a shortage, provide suggestions
     if (allocationResult.shortage) {
-      // Find faculty who were NOT assigned but ARE free and MEET all rules
+      // Suggest all faculty who are free in this session (ignoring soft limits like continuous/weekly caps)
       const allFacultyInDb = await Faculty.find({ role: "faculty" }).lean();
 
       allocationResult.suggestions = allFacultyInDb
-        .filter(f => !globalAssignedIds.has(f._id.toString())) // Must be free
-        .filter(f => {
-          // Check if they distrub any rules (Continuous, Weekly, Hard Duplicates)
-          // We pass an empty hallAssignedIds because we just want to know if they are generally eligible
-          return isFacultyAvailable(f, {}, [], examDate);
-        })
+        .filter(f => !globalAssignedIds.has(f._id.toString())) // Not already assigned in this generation run
+        .filter(f => !sameSessionFacultySet.has(f._id.toString())) // No duplicate duty in this same session
         .map(f => ({ id: f._id, name: f.name, department: f.department }));
     }
 
     // POPULATE UNALLOCATED STUDENTS
+    // AL-06: remaining students are those after the pointer position (not yet consumed)
     const unallocated = [];
     deptIds.forEach((deptId) => {
-      if (deptQueues[deptId] && deptQueues[deptId].length > 0) {
-        unallocated.push(...deptQueues[deptId]);
+      const ptr = deptPtrs[deptId] || 0;
+      if (ptr < deptQueues[deptId].length) {
+        unallocated.push(...deptQueues[deptId].slice(ptr));
       }
     });
 
@@ -714,7 +829,9 @@ export const generateSeatingPlan = async (req, res) => {
       success: true,
       count: assignments.length,
       unallocated: unallocated,
-      allocationResult
+      allocationResult,
+      warnings: generationWarnings,           // AL-03: seat deadlock warnings
+      warningCount: generationWarnings.length  // AL-03: convenience count
     });
   } catch (err) {
     console.error("Generation error:", err);
@@ -768,51 +885,52 @@ export const finalizeSeatingPlan = async (req, res) => {
       isFinalized: true
     };
 
-    const newDuties = [];
+    // AL-07: build a hallId → facultyIds lookup from session-scoped assignments
+    // (replaces direct read of Hall.facultyAssigned which is now deprecated)
+    const faMap = new Map(
+      (session.facultyAssignments || []).map(fa => [fa.hallId.toString(), fa.facultyIds])
+    );
 
     for (const hall of halls) {
-      // Check if this hall was used (has assignments or faculty assigned)
-      if (hall.facultyAssigned && hall.facultyAssigned.length > 0) {
+      // 1. Fetch assignments for this hall
+      const assignments = await SeatAssignment.find({ hallId: hall._id, examSessionId });
 
-        // Create Duty Records
-        for (const facultyId of hall.facultyAssigned) {
-          newDuties.push({
-            facultyId,
-            hallId: hall._id,
-            examDate: session.examDate,
-            examSession: session.examSession,
-            examTime: session.examTime
-          });
+      // 2. Only process if hall is NOT empty (has students)
+      if (assignments.length > 0) {
 
-          // Update Faculty stats
-          await Faculty.findByIdAndUpdate(facultyId, {
-            lastDutyDate: new Date(),
-            // Increment weekly count? Need accurate week logic
-          });
+        // Read faculty from ExamSession (AL-07) with fallback to deprecated Hall field
+        const assignedFaculty = faMap.get(hall._id.toString()) || hall.facultyAssigned || [];
+
+        // Create/update Duty Records (if any faculty were assigned)
+        if (assignedFaculty.length > 0) {
+          for (const facultyId of assignedFaculty) {
+            await FacultyDuty.updateOne(
+              { facultyId, examDate: session.examDate, examSession: session.examSession },
+              { $set: { hallId: hall._id, examTime: session.examTime } },
+              { upsert: true }
+            );
+
+            // Update Faculty stats
+            await Faculty.findByIdAndUpdate(facultyId, {
+              lastDutyDate: new Date(),
+            });
+          }
         }
 
         // Add to SeatingPlan snapshot
-        // Fetch assignments for this hall
-        const assignments = await SeatAssignment.find({ hallId: hall._id, examSessionId });
-
         seatingPlanData.halls.push({
           hallId: hall._id,
           assignments: assignments, // Full snapshot
-          facultyAssigned: hall.facultyAssigned
+          facultyAssigned: assignedFaculty // AL-07: from session, not Hall
         });
-
-        // Clear transient draft from Hall (Optional, but good cleanup)
-        // hall.facultyAssigned = [];
-        // await hall.save(); 
-        // Actually, let's keep it in Hall for now so Admin Review panel still works if they revisit? 
-        // Or strictly 'Draft' vs 'Final'. 
-        // If finalized, we shouldn't change Hall.facultyAssigned essentially locks it.
       }
     }
 
-    if (newDuties.length > 0) {
-      await FacultyDuty.insertMany(newDuties);
-    }
+    // Remove any existing snapshot for this session (idempotent finalize)
+    await SeatingPlan.deleteOne({
+      examDate: session.examDate,
+      examSession: session.examSession
+    });
 
     const plan = new SeatingPlan(seatingPlanData);
     await plan.save();
@@ -823,3 +941,53 @@ export const finalizeSeatingPlan = async (req, res) => {
     res.status(500).json({ error: "Failed to finalize plan" });
   }
 };
+
+/* ===============================
+   GET ALL FACULTY DUTIES
+================================ */
+export const getAllDuties = async (req, res) => {
+  try {
+    const duties = await FacultyDuty.find({}).populate('hallId').populate('facultyId');
+    res.json(duties);
+  } catch (error) {
+    console.error("Error fetching all duties:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* ===============================
+   MARK ABSENT (FACULTY/ADMIN)
+================================ */
+export const markAbsent = async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const { isAbsent } = req.body; // true or false
+
+    const assignment = await SeatAssignment.findById(assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ message: 'Assignment not found.' });
+    }
+
+    // Safety: only allow marking on FINAL published sessions
+    const session = await ExamSession.findById(assignment.examSessionId);
+    if (!session || session.status !== 'FINAL' || !session.isPublished) {
+      return res.status(400).json({
+        message: 'Can only mark absences on published final sessions.'
+      });
+    }
+
+    assignment.isAbsent = isAbsent === true;
+    assignment.markedAbsentAt = isAbsent ? new Date() : null;
+    assignment.markedAbsentBy = req.user?.username || 'unknown';
+    await assignment.save();
+
+    return res.json({
+      message: isAbsent ? 'Student marked absent.' : 'Absence cleared.',
+      assignmentId,
+      isAbsent: assignment.isAbsent
+    });
+  } catch (err) {
+    return res.status(500).json({ message: 'Error marking absent.', error: err.message });
+  }
+};
+

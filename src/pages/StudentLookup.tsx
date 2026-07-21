@@ -35,7 +35,8 @@ interface ExamDetail {
     session: string;
     time: string;
     rollNumber: string;
-    seatPosition: string; // NEW property for Seat Number feature
+    seatPosition: string; 
+    type?: string; // Internal or Anna University
 }
 
 const StudentLookup = () => {
@@ -243,7 +244,14 @@ const StudentLookup = () => {
                                         </div>
                                     </div>
                                     <div className="mt-6 pt-4 border-t flex justify-between items-center text-xs text-slate-400">
-                                        <span>Roll Number: {detail.rollNumber}</span>
+                                        <div className="flex gap-2 items-center">
+                                            <span>Roll Number: {detail.rollNumber}</span>
+                                            {detail.type && (
+                                                <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 font-medium whitespace-nowrap">
+                                                    {detail.type}
+                                                </span>
+                                            )}
+                                        </div>
                                         <span className="bg-green-100 text-green-700 font-medium px-2 py-1 rounded">Confirmed Arrangement</span>
                                     </div>
                                 </CardContent>

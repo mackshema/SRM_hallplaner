@@ -13,6 +13,16 @@ const examSessionSchema = new mongoose.Schema(
         activeDepartments: [{ type: String }],
         selectedFaculty: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
         blockedCombinations: [[{ type: String }]], // Array of department strings
+
+        // AL-07: Per-session faculty assignments (replaces global Hall.facultyAssigned)
+        // Keyed by hallId so two concurrent generation runs never overwrite each other.
+        facultyAssignments: [{
+            hallId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Hall"
+            },
+            facultyIds: [{ type: String }]
+        }],
     },
     { timestamps: true }
 );

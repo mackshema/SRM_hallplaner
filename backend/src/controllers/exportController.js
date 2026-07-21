@@ -142,8 +142,8 @@ export const downloadAnnaExamPackage = async (req, res) => {
             examCellName: settings.examCellName || "EXAMINATION CELL",
             academicYear: settings.academicYear || "ACADEMIC YEAR 2025-2026",
             examName: "END SEMESTER EXAMINATIONS",
-            leftLogo: null, // STRICTLY NO LOGOS
-            rightLogo: null
+            leftLogo: settings.leftLogo,
+            rightLogo: settings.rightLogo
         };
 
         // 3. Fetch data
@@ -260,8 +260,8 @@ export const downloadAnnaConsolidated = async (req, res) => {
             institutionAffiliation: settings.institutionAffiliation || "Approved by AICTE | Affiliated to Anna University",
             examCellName: settings.examCellName || "EXAMINATION CELL",
             academicYear: settings.academicYear || "ACADEMIC YEAR 2025-2026",
-            leftLogo: null,
-            rightLogo: null
+            leftLogo: settings.leftLogo,
+            rightLogo: settings.rightLogo
         };
 
         const assignments = plan.assignments.map(a => ({ ...a, studentRollNumber: a.rollNumber }));
@@ -303,8 +303,8 @@ export const downloadAnnaLayouts = async (req, res) => {
             institutionAffiliation: settings.institutionAffiliation || "Approved by AICTE | Affiliated to Anna University",
             examCellName: settings.examCellName || "EXAMINATION CELL",
             academicYear: settings.academicYear || "ACADEMIC YEAR 2025-2026",
-            leftLogo: null,
-            rightLogo: null
+            leftLogo: settings.leftLogo,
+            rightLogo: settings.rightLogo
         };
 
         const assignments = plan.assignments.map(a => ({ ...a, studentRollNumber: a.rollNumber }));

@@ -29,6 +29,8 @@ export interface HeaderSettings {
     examCellName: string;
     academicYear: string;
     examName: string;
+    leftLogo?: string;
+    rightLogo?: string;
 }
 
 interface ExportBenchLayoutWordOptions {
@@ -53,36 +55,137 @@ export const exportBenchLayoutWordDoc = async ({
     headerSettings,
 }: ExportBenchLayoutWordOptions) => {
     // 1. Prepare Header Paragraphs
-    const headerParagraphs = [
-        new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [
-                new TextRun({
-                    text: headerSettings.institutionName || "SRM MADURAI",
-                    bold: true,
-                    size: 36, // 18pt
-                }),
-            ],
-        }),
-        new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [
-                new TextRun({
-                    text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY",
-                    size: 28, // 14pt
-                }),
-            ],
-        }),
-        new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 200 },
-            children: [
-                new TextRun({
-                    text: headerSettings.institutionAffiliation || "Approved by AICTE, New Delhi | Affiliated to Anna University, Chennai",
-                    size: 20, // 10pt
-                }),
-            ],
-        }),
+    const headerParagraphs: any[] = [];
+
+    if (headerSettings.leftLogo || headerSettings.rightLogo) {
+        headerParagraphs.push(
+            new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: {
+                    top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                    bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                    left: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                    right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                    insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                    insideVertical: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                },
+                rows: [
+                    new TableRow({
+                        children: [
+                            new TableCell({
+                                width: { size: 15, type: WidthType.PERCENTAGE },
+                                children: [
+                                    headerSettings.leftLogo ? (() => {
+                                        try {
+                                          return new Paragraph({
+                                              children: [
+                                                  // @ts-ignore
+                                                  new ImageRun({
+                                                      data: Uint8Array.from(atob(headerSettings.leftLogo.split(",")[1]), c => c.charCodeAt(0)),
+                                                      transformation: { width: 80, height: 80 },
+                                                      type: "png"
+                                                  })
+                                              ],
+                                              alignment: AlignmentType.LEFT
+                                          });
+                                        } catch(e) { return new Paragraph(""); }
+                                    })() : new Paragraph(""),
+                                ],
+                            }),
+                            new TableCell({
+                                width: { size: 70, type: WidthType.PERCENTAGE },
+                                children: [
+                                    new Paragraph({
+                                        alignment: AlignmentType.CENTER,
+                                        children: [
+                                            new TextRun({
+                                                text: headerSettings.institutionName || "SRM MADURAI",
+                                                bold: true,
+                                                size: 36, // 18pt
+                                            }),
+                                        ],
+                                    }),
+                                    new Paragraph({
+                                        alignment: AlignmentType.CENTER,
+                                        children: [
+                                            new TextRun({
+                                                text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY",
+                                                size: 28, // 14pt
+                                            }),
+                                        ],
+                                    }),
+                                    new Paragraph({
+                                        alignment: AlignmentType.CENTER,
+                                        spacing: { after: 200 },
+                                        children: [
+                                            new TextRun({
+                                                text: headerSettings.institutionAffiliation || "Approved by AICTE, New Delhi | Affiliated to Anna University, Chennai",
+                                                size: 20, // 10pt
+                                            }),
+                                        ],
+                                    }),
+                                ],
+                            }),
+                            new TableCell({
+                                width: { size: 15, type: WidthType.PERCENTAGE },
+                                children: [
+                                    headerSettings.rightLogo ? (() => {
+                                        try {
+                                          return new Paragraph({
+                                              children: [
+                                                  // @ts-ignore
+                                                  new ImageRun({
+                                                      data: Uint8Array.from(atob(headerSettings.rightLogo.split(",")[1]), c => c.charCodeAt(0)),
+                                                      transformation: { width: 80, height: 80 },
+                                                      type: "png"
+                                                  })
+                                              ],
+                                              alignment: AlignmentType.RIGHT
+                                          });
+                                        } catch(e) { return new Paragraph(""); }
+                                    })() : new Paragraph(""),
+                                ],
+                            }),
+                        ],
+                    }),
+                ],
+            })
+        );
+    } else {
+        headerParagraphs.push(
+            new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                    new TextRun({
+                        text: headerSettings.institutionName || "SRM MADURAI",
+                        bold: true,
+                        size: 36, // 18pt
+                    }),
+                ],
+            }),
+            new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                    new TextRun({
+                        text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY",
+                        size: 28, // 14pt
+                    }),
+                ],
+            }),
+            new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 200 },
+                children: [
+                    new TextRun({
+                        text: headerSettings.institutionAffiliation || "Approved by AICTE, New Delhi | Affiliated to Anna University, Chennai",
+                        size: 20, // 10pt
+                    }),
+                ],
+            })
+        );
+    }
+
+    headerParagraphs.push(
         new Paragraph({
             alignment: AlignmentType.CENTER,
             children: [
@@ -120,8 +223,8 @@ export const exportBenchLayoutWordDoc = async ({
                     size: 22,
                 }),
             ],
-        }),
-    ];
+        })
+    );
 
     // 2. Hall Info & Date Row (Using a borderless table for alignment)
     const infoTable = new Table({

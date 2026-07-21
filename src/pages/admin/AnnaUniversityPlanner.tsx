@@ -8,10 +8,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import Tesseract from "tesseract.js";
-import { Loader2, X, Plus, Calendar, View, CheckCircle2, Lock, Unlock, Eye, EyeOff, Trash2 } from "lucide-react";
+import { Loader2, X, Plus, Calendar, View, CheckCircle2, Lock, Unlock, Eye, EyeOff, Trash2, AlertCircle } from "lucide-react";
 import * as XLSX from "xlsx";
 import AnnaHallView from "@/components/AnnaHallView";
 import ExcelUploadHelper from "@/components/ExcelUploadHelper";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -31,6 +41,7 @@ const AnnaUniversityPlanner = () => {
   const [timetableFile, setTimetableFile] = useState<File | null>(null);
   const [lastUploadedName, setLastUploadedName] = useState(localStorage.getItem('anna_timetable_filename') || null);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   // Manual Mapping State
   const [isManualMapOpen, setIsManualMapOpen] = useState(false);
@@ -49,10 +60,86 @@ const AnnaUniversityPlanner = () => {
   // Layout View State
   const [viewingHallId, setViewingHallId] = useState<string | null>(null);
 
+  const [facultyList, setFacultyList] = useState<any[]>([]);
+  const [showShortageDialog, setShowShortageDialog] = useState(false);
+  const [allocationWarnings, setAllocationWarnings] = useState<string[]>([]);
+  const [facultySuggestions, setFacultySuggestions] = useState<any[]>([]);
+  const [tempDemandFacultyIds, setTempDemandFacultyIds] = useState<string[]>([]);
+
+  const [newFacultyForm, setNewFacultyForm] = useState({
+    name: "",
+    username: "",
+    department: ""
+  });
+  const [creatingInstantFaculty, setCreatingInstantFaculty] = useState(false);
+
   useEffect(() => {
     fetchAllPlans();
     fetchExamData();
+    fetchFacultyList();
   }, []);
+
+  const fetchFacultyList = async () => {
+    try {
+      const res = await fetch(`${API_URL}/users`);
+      const data = await res.json();
+      setFacultyList((data || []).filter((u: any) => u.role === 'faculty'));
+    } catch (err) {
+      console.error("Failed to load faculty list:", err);
+    }
+  };
+
+  const handleInstantCreateFaculty = async () => {
+    if (!newFacultyForm.name.trim() || !newFacultyForm.username.trim() || !newFacultyForm.department.trim()) {
+      toast({ title: "Error", description: "Please fill all faculty fields", variant: "destructive" });
+      return;
+    }
+
+    const nameRegex = /^.+\.\s*.+$/;
+    if (!nameRegex.test(newFacultyForm.name)) {
+      toast({
+        title: "Invalid Name Format",
+        description: "Name must include initial and full name (Example: R. Kumar).",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setCreatingInstantFaculty(true);
+    try {
+      const res = await fetch(`${API_URL}/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newFacultyForm.name.trim(),
+          username: newFacultyForm.username.trim(),
+          department: newFacultyForm.department.trim(),
+          password: "faculty123",
+          role: 'faculty',
+          designation: "Assistant Professor",
+          facultyEmail: `${newFacultyForm.username.trim()}@institution.edu`,
+          hodEmail: `hod.${newFacultyForm.department.trim().toLowerCase()}@institution.edu`
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to create faculty");
+      }
+
+      const added = await res.json();
+      toast({ title: "Success", description: `Faculty ${added.name} created instantly.` });
+
+      setFacultyList(prev => [...prev, added]);
+      setFacultySuggestions(prev => [...prev, { id: added._id || added.id, name: added.name, department: added.department }]);
+      setTempDemandFacultyIds(prev => [...prev, String(added._id || added.id)]);
+      setNewFacultyForm({ name: "", username: "", department: "" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to create faculty", variant: "destructive" });
+    } finally {
+      setCreatingInstantFaculty(false);
+    }
+  };
 
   const fetchExamData = async () => {
     try {
@@ -89,11 +176,15 @@ const AnnaUniversityPlanner = () => {
         });
         const data = await res.json();
         if (data.success) {
-           toast({ title: "Success", description: `Updated mapping for ${data.updatedSubjects} subjects.` });
+           toast({ 
+             title: "Timetable & Plans Updated", 
+             description: `${data.message}${data.generation ? ` Generated ${data.generation.count} sessions.` : ""}` 
+           });
            setLastUploadedName(timetableFile.name);
            localStorage.setItem('anna_timetable_filename', timetableFile.name);
            setTimetableFile(null);
            fetchExamData();
+           fetchAllPlans();
         } else toast({ title: "Error", description: data.error, variant: "destructive" });
       } catch(e) {
         toast({ title: "OCR Error", description: "Failed to parse image.", variant: "destructive" });
@@ -103,23 +194,67 @@ const AnnaUniversityPlanner = () => {
       return;
     }
 
+    setUploading(true);
     const formData = new FormData();
     formData.append("file", timetableFile);
     try {
-      const res = await fetch(`${API_URL}/anna/upload-timetable`, {
+      // Step 1: Check what will be destroyed (no ?confirmed)
+      const checkRes = await fetch(`${API_URL}/anna/upload-timetable`, {
         method: "POST",
         body: formData,
-      });
-      const data = await res.json();
-      if (data.success) {
-         toast({ title: "Success", description: `Updated mapping for ${data.updatedSubjects} subjects.` });
-         setLastUploadedName(timetableFile.name);
-         localStorage.setItem('anna_timetable_filename', timetableFile.name);
-         setTimetableFile(null);
-         fetchExamData();
-      } else toast({ title: "Error", description: data.error, variant: "destructive" });
+      }).then(r => r.json());
+
+      if (checkRes.requiresConfirmation) {
+        // Step 2: Show warning to admin
+        const confirmed = window.confirm(
+          checkRes.warning + '\n\nClick OK to proceed, Cancel to abort.'
+        );
+        if (!confirmed) {
+          setUploading(false);
+          toast({ title: "Cancelled", description: "Upload cancelled — no data deleted." });
+          return;
+        }
+
+        // Step 3: Confirmed — re-upload with flag
+        const confirmData = new FormData();
+        confirmData.append("file", timetableFile);
+        const res = await fetch(`${API_URL}/anna/upload-timetable?confirmed=true`, {
+          method: "POST",
+          body: confirmData,
+        });
+        const data = await res.json();
+        if (data.success) {
+           toast({ 
+             title: "Timetable & Plans Updated", 
+             description: `${data.message}${data.generation ? ` Generated ${data.generation.count} sessions.` : ""}` 
+           });
+           setLastUploadedName(timetableFile.name);
+           localStorage.setItem('anna_timetable_filename', timetableFile.name);
+           setTimetableFile(null);
+           fetchExamData();
+           fetchAllPlans();
+        } else {
+          toast({ title: "Error", description: data.error, variant: "destructive" });
+        }
+      } else {
+        if (checkRes.success) {
+           toast({ 
+             title: "Timetable & Plans Updated", 
+             description: `${checkRes.message}${checkRes.generation ? ` Generated ${checkRes.generation.count} sessions.` : ""}` 
+           });
+           setLastUploadedName(timetableFile.name);
+           localStorage.setItem('anna_timetable_filename', timetableFile.name);
+           setTimetableFile(null);
+           fetchExamData();
+           fetchAllPlans();
+        } else {
+           toast({ title: "Error", description: checkRes.error, variant: "destructive" });
+        }
+      }
     } catch(e) {
       toast({ title: "Error", description: "Failed to upload", variant: "destructive" });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -177,18 +312,37 @@ const AnnaUniversityPlanner = () => {
       const res = await fetch(`${API_URL}/anna/generate-all-seating`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ maxPerHall: 25, seatsPerBench: 2 })
+        body: JSON.stringify({ maxPerHall: 25, seatsPerBench: 2, demandFacultyIds: tempDemandFacultyIds })
       });
       const data = await res.json();
       if (data.success) {
          toast({ title: "Bulk Generation Complete", description: `Created ${data.count} new plans. Skipped ${data.skipped} existing plans.` });
          fetchAllPlans();
+
+         // Show shortage popup if faculty couldn't be fully allocated
+         if (data.shortage && data.allocationWarnings && data.allocationWarnings.length > 0) {
+           setAllocationWarnings(data.allocationWarnings);
+           setFacultySuggestions(data.facultySuggestions || []);
+           setTempDemandFacultyIds([]);
+           setShowShortageDialog(true);
+         }
       } else {
          toast({ title: "Error", description: data.error, variant: "destructive" });
       }
     } catch(e) {
       toast({ title: "Error", description: "Failed to generate seating", variant: "destructive" });
     }
+  };
+
+  const handleApplyDemand = () => {
+    setShowShortageDialog(false);
+    generateAllSeating();
+  };
+
+  const toggleDemandFaculty = (id: string) => {
+    setTempDemandFacultyIds(prev =>
+      prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
+    );
   };
 
   const fetchSeatingPlan = async (d?: string, s?: string) => {
@@ -360,7 +514,7 @@ const AnnaUniversityPlanner = () => {
               <ExcelUploadHelper
                 columns={[
                   { header: "Subject Code", example: "CS3401",     required: true, description: "Subject code" },
-                  { header: "Year",         example: "Third Year",  required: true, description: "Student year/batch" },
+                  { header: "Year",         example: "Year 3",  required: true, description: "Student year/batch" },
                   { header: "Department",   example: "CSE",         required: true, description: "Dept abbreviation" },
                   { header: "Date",         example: "2025-11-10",  required: true, description: "YYYY-MM-DD" },
                   { header: "Session",      example: "FN",          required: true, description: "FN or AN" },
@@ -368,6 +522,21 @@ const AnnaUniversityPlanner = () => {
                 templateFilename="AnnaUniversity_Timetable_Template.xlsx"
                 note="One row per subject per department. Supports Excel or image scan."
               />
+              <div style={{
+                background: "#FCEBEB",
+                borderLeft: "4px solid #dc2626",
+                padding: "10px 14px",
+                borderRadius: "4px",
+                marginBottom: "12px",
+                fontSize: "13px",
+                color: "#7f1d1d",
+                lineHeight: "1.5"
+              }}>
+                <strong>Warning:</strong> Uploading a new timetable will
+                permanently delete ALL existing Anna seating plans and
+                ALL faculty duty records. This cannot be undone.
+                A confirmation will be required before proceeding.
+              </div>
               <div className="flex gap-4 items-center">
                 {timetableFile ? (
                   <div className="flex items-center gap-2 border rounded-md px-3 py-2 flex-grow bg-slate-50">
@@ -389,9 +558,9 @@ const AnnaUniversityPlanner = () => {
                 ) : (
                   <Input type="file" accept=".xlsx, image/*" className="flex-grow" onChange={(e) => setTimetableFile(e.target.files?.[0] || null)} />
                 )}
-                <Button onClick={handleUploadTimetable} disabled={isOcrProcessing || !timetableFile}>
-                  {isOcrProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {isOcrProcessing ? "Scanning..." : "Upload Timetable"}
+                <Button onClick={handleUploadTimetable} disabled={isOcrProcessing || uploading || !timetableFile}>
+                  {(isOcrProcessing || uploading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isOcrProcessing ? "Scanning..." : (uploading ? "Uploading..." : "Upload Timetable")}
                 </Button>
               </div>
 
@@ -408,18 +577,30 @@ const AnnaUniversityPlanner = () => {
                          <TableHead>Specific Roll (if any)</TableHead>
                        </TableRow>
                      </TableHeader>
-                     <TableBody>
-                       {examData.map((d: any, i: number) => (
-                         <TableRow key={i}>
-                           <TableCell className="font-medium whitespace-nowrap">{d.examDate}</TableCell>
-                           <TableCell><span className={`px-2 py-1 rounded text-xs font-bold ${d.session === 'FN' ? 'bg-orange-100 text-orange-800' : 'bg-indigo-100 text-indigo-800'}`}>{d.session}</span></TableCell>
-                           <TableCell className="font-bold">{d.subjectCode}</TableCell>
-                           <TableCell>{d.department}</TableCell>
-                           <TableCell>{d.year}</TableCell>
-                           <TableCell>{d.rollNumber || <span className="text-slate-400 italic">All Matching</span>}</TableCell>
-                         </TableRow>
-                       ))}
-                     </TableBody>
+                      <TableBody>
+                        {examData.map((d: any, i: number) => (
+                          <TableRow key={i} className={!d.examDate ? "bg-red-50/50" : ""}>
+                            <TableCell className="font-medium whitespace-nowrap">
+                              {d.examDate ? d.examDate : (
+                                <span className="text-red-500 flex items-center gap-1 font-semibold text-xs bg-red-100 px-2 py-1 rounded w-fit">
+                                  <AlertCircle className="h-3 w-3" /> Unscheduled
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {d.session ? (
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${d.session === 'FN' ? 'bg-orange-100 text-orange-800' : 'bg-indigo-100 text-indigo-800'}`}>
+                                  {d.session}
+                                </span>
+                              ) : "-"}
+                            </TableCell>
+                            <TableCell className="font-bold">{d.subjectCode}</TableCell>
+                            <TableCell>{d.department}</TableCell>
+                            <TableCell>{d.year}</TableCell>
+                            <TableCell>{d.rollNumber || <span className="text-slate-400 italic">All Matching</span>}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
                    </Table>
                 </div>
               )}
@@ -571,21 +752,35 @@ const AnnaUniversityPlanner = () => {
                           <TableRow className="bg-white">
                             <TableHead>Hall ID/Name</TableHead>
                             <TableHead>Total Students</TableHead>
+                            <TableHead>Assigned Faculty</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {uniqueHalls.map((hallGroup: any, idx: number) => (
-                            <TableRow key={idx}>
-                              <TableCell className="font-medium whitespace-nowrap text-[15px]">{hallGroup.hallName}</TableCell>
-                              <TableCell><span className="font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded">{hallGroup.assignments.length}</span> students</TableCell>
-                              <TableCell className="text-right">
-                                <Button variant="outline" size="sm" onClick={() => setViewingHallId(hallGroup.hallId)}>
-                                   <View className="h-4 w-4 mr-2" /> View & Configure Hall Layout
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {uniqueHalls.map((hallGroup: any, idx: number) => {
+                            const assignment = (seatingPlan?.facultyAssignments || []).find((fa: any) => fa.hallId.toString() === hallGroup.hallId.toString());
+                            const assignedNames = assignment
+                              ? assignment.facultyIds.map((id: string) => {
+                                  const fac = facultyList.find((f: any) => f._id === id || f.id === id);
+                                  return fac ? fac.name : id;
+                                }).join(", ")
+                              : "";
+
+                            return (
+                              <TableRow key={idx}>
+                                <TableCell className="font-medium whitespace-nowrap text-[15px]">{hallGroup.hallName}</TableCell>
+                                <TableCell><span className="font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded">{hallGroup.assignments.length}</span> students</TableCell>
+                                <TableCell className="text-sm font-medium text-slate-600">
+                                  {assignedNames || <span className="text-slate-400 italic">None Assigned</span>}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button variant="outline" size="sm" onClick={() => setViewingHallId(hallGroup.hallId)}>
+                                     <View className="h-4 w-4 mr-2" /> View & Configure Hall Layout
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </TabsContent>
@@ -753,11 +948,117 @@ const AnnaUniversityPlanner = () => {
                  <AnnaHallView 
                    hallId={viewingHallId} 
                    assignments={seatingPlan.assignments.filter((a: any) => a.hallId === viewingHallId)} 
+                   facultyNames={
+                     (seatingPlan.facultyAssignments || [])
+                       .find((fa: any) => fa.hallId.toString() === viewingHallId.toString())
+                       ?.facultyIds.map((id: string) => {
+                         const fac = facultyList.find((f: any) => f._id === id || f.id === id);
+                         return fac ? fac.name : id;
+                       }) || []
+                   }
                  />
                )}
             </div>
          </DialogContent>
       </Dialog>
+
+      {/* Faculty Shortage / Demand Dialog */}
+      <AlertDialog open={showShortageDialog} onOpenChange={setShowShortageDialog}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-orange-600 flex items-center gap-2">
+              Faculty Allocation Shortage
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The system could not fulfill all faculty requirements based on existing rules (e.g., max 4 duties/week, no continuous sessions).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="bg-orange-50 p-3 rounded border border-orange-200 text-sm">
+              <p className="font-bold mb-1">Warnings:</p>
+              <ul className="list-disc pl-5">
+                {allocationWarnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+
+            <div>
+              <p className="text-sm font-bold mb-2">Available Faculty for Force Assignment (Demand):</p>
+              <div className="max-h-60 overflow-y-auto border rounded-md p-2 grid grid-cols-2 gap-2">
+                {facultySuggestions.map((f) => (
+                  <div key={f.id} className="flex items-center gap-2 border p-2 rounded hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      id={`suggest-${f.id}`}
+                      checked={tempDemandFacultyIds.includes(f.id)}
+                      onChange={() => toggleDemandFaculty(f.id)}
+                    />
+                    <label htmlFor={`suggest-${f.id}`} className="text-xs cursor-pointer">
+                      <span className="font-semibold block">{f.name}</span>
+                      <span className="text-gray-500">{f.department}</span>
+                    </label>
+                  </div>
+                ))}
+                {facultySuggestions.length === 0 && <p className="text-sm italic text-gray-500 col-span-2 text-center py-4">No other available faculty found. Please add new faculty in the Faculty tab.</p>}
+              </div>
+            </div>
+
+            {/* Instant Faculty Creation Form */}
+            <div className="border-t pt-4">
+              <p className="text-sm font-bold mb-2 text-slate-800">Instantly Add New Faculty Member:</p>
+              <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div>
+                  <Label htmlFor="inst-name" className="text-xs text-slate-600">Full Name (Format: R. Kumar)</Label>
+                  <Input 
+                    id="inst-name"
+                    placeholder="e.g. R. Kumar" 
+                    value={newFacultyForm.name} 
+                    onChange={e => setNewFacultyForm(prev => ({ ...prev, name: e.target.value }))}
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="inst-username" className="text-xs text-slate-600">Username / Faculty ID</Label>
+                  <Input 
+                    id="inst-username"
+                    placeholder="e.g. fac_rkumar" 
+                    value={newFacultyForm.username} 
+                    onChange={e => setNewFacultyForm(prev => ({ ...prev, username: e.target.value }))}
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Label htmlFor="inst-dept" className="text-xs text-slate-600">Department</Label>
+                    <Input 
+                      id="inst-dept"
+                      placeholder="e.g. CSE" 
+                      value={newFacultyForm.department} 
+                      onChange={e => setNewFacultyForm(prev => ({ ...prev, department: e.target.value }))}
+                      className="h-8 text-xs mt-1"
+                    />
+                  </div>
+                  <Button 
+                    size="sm" 
+                    onClick={handleInstantCreateFaculty} 
+                    disabled={creatingInstantFaculty}
+                    className="h-8 text-xs bg-slate-800 hover:bg-slate-900 text-white"
+                  >
+                    {creatingInstantFaculty ? "Adding..." : "Add"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <Button variant="ghost" onClick={() => setShowShortageDialog(false)}>Ignore & Keep Current</Button>
+            <Button onClick={handleApplyDemand} className="bg-orange-600 hover:bg-orange-700 text-white">
+              Confirm & Re-run (Apply Demand)
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

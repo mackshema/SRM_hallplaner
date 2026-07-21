@@ -1,10 +1,11 @@
 import User from "../models/User.js";
+import bcrypt from "bcryptjs";
 
 // @desc    Get all users
 // @route   GET /api/users
 export const getUsers = async (req, res) => {
     try {
-        const users = await User.find({});
+        const users = await User.find({}).select('-password -plainPassword');
         // Map _id to id for frontend compatibility if needed, though frontend now handles _id
         res.json(users);
     } catch (error) {
@@ -27,10 +28,12 @@ export const createUser = async (req, res) => {
             }
         }
 
+        const normalizedUsername = username?.trim().toUpperCase();
+
         // FIX 2: Duplicate Faculty Error Description
         const facultyExists = await User.findOne({
             $or: [
-                { username },
+                { username: normalizedUsername },
                 { name, role: 'faculty' }
             ]
         });
@@ -39,10 +42,13 @@ export const createUser = async (req, res) => {
             return res.status(400).json({ message: "Duplicate faculty detected. The same faculty cannot be added multiple times." });
         }
 
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         const user = await User.create({
             name,
-            username,
-            password, // Plain text for demo as per requirement
+            username: normalizedUsername,
+            password: hashedPassword,
             role: role || 'faculty',
             department,
             designation,
@@ -101,7 +107,8 @@ export const updateUser = async (req, res) => {
             if (req.body.hodEmail !== undefined) user.hodEmail = req.body.hodEmail;
 
             if (req.body.password) {
-                user.password = req.body.password;
+                const salt = await bcrypt.genSalt(10);
+                user.password = await bcrypt.hash(req.body.password, salt);
             }
             if (req.body.isSelected !== undefined) {
                 user.isSelected = req.body.isSelected;
@@ -122,7 +129,6 @@ export const updateUser = async (req, res) => {
                 designation: updatedUser.designation,
                 facultyEmail: updatedUser.facultyEmail,
                 hodEmail: updatedUser.hodEmail,
-                password: updatedUser.password,
                 isSelectedForGeneration: updatedUser.isSelectedForGeneration
             });
         } else {

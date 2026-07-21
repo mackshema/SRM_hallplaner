@@ -61,7 +61,9 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
     institutionAffiliation: "",
     examCellName: "",
     academicYear: "",
-    examName: ""
+    examName: "",
+    leftLogo: "",
+    rightLogo: ""
   });
   const {
     examDate,
@@ -470,7 +472,11 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           ],
           rows: tableData as (string | number)[][], // Explicit cast to match expected type
           footerText: "Examcell Coordinator\t\t\t\t\t\tChief Superintendent",
-          landscape: true
+          landscape: true,
+          leftLogo: settings.leftLogo,
+          rightLogo: settings.rightLogo,
+          institutionSubtitle: settings.institutionSubtitle,
+          institutionAffiliation: settings.institutionAffiliation
         });
 
         toast({
@@ -521,6 +527,19 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
 
       doc.setFontSize(14);
       doc.text(settings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY", centerX, 22, { align: "center" });
+
+      if (settings.leftLogo) {
+        try {
+          const format = settings.leftLogo.substring(settings.leftLogo.indexOf('/') + 1, settings.leftLogo.indexOf(';')).toUpperCase();
+          doc.addImage(settings.leftLogo, format, 14, 8, 20, 20);
+        } catch (e) { console.error("Logo error", e); }
+      }
+      if (settings.rightLogo) {
+        try {
+          const format = settings.rightLogo.substring(settings.rightLogo.indexOf('/') + 1, settings.rightLogo.indexOf(';')).toUpperCase();
+          doc.addImage(settings.rightLogo, format, pageWidth - 34, 8, 20, 20);
+        } catch (e) { console.error("Logo error", e); }
+      }
 
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");

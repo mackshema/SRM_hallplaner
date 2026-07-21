@@ -52,11 +52,17 @@ export const createHall = async (req, res) => {
       ? facultyAssigned.map(f => String(f))
       : [];
 
+    // Drawing Hall Logic: if name contains 'DH', force seatsPerBench to 1
+    let finalSeatsPerBench = Number(seatsPerBench);
+    if (name.toUpperCase().includes("DH")) {
+      finalSeatsPerBench = 1;
+    }
+
     const hall = await Hall.create({
       name,
       rows,
       columns,
-      seatsPerBench,
+      seatsPerBench: finalSeatsPerBench,
       floor,
       facultyAssigned: normalizedFacultyAssigned,
       extraBenches,
@@ -78,7 +84,7 @@ export const createHall = async (req, res) => {
     // Handle duplicate key errors
     if (error.code === 11000) {
       return res.status(400).json({
-        message: "Hall with this name already exists"
+        message: `Hall named "${name}" already exists.`
       });
     }
 
@@ -132,10 +138,49 @@ export const getAllHalls = async (req, res) => {
             facultyAssigned: dutyMap[h._id.toString()] || []
           }));
         } else {
-          // If DRAFT, we assume Hall.facultyAssigned is the current working state.
-          // No change needed as Hall.facultyAssigned is already there.
-          // However, if we wanted to be strict that Hall.facultyAssigned belongs to the *latest* draft...
-          // For now, we leave it as is.
+          // If DRAFT, source is ExamSession.facultyAssignments (AL-07) with fallback to global Hall.facultyAssigned
+          const faMap = {};
+          if (session.facultyAssignments && session.facultyAssignments.length > 0) {
+            session.facultyAssignments.forEach(fa => {
+              faMap[fa.hallId.toString()] = fa.facultyIds;
+            });
+          }
+          halls = halls.map(h => ({
+            ...h,
+            facultyAssigned: faMap[h._id.toString()] || h.facultyAssigned || []
+          }));
+        }
+      } else {
+        // Check if it's an Anna University plan
+        const annaPlan = await AnnaSeating.findById(examSessionId);
+        if (annaPlan) {
+          if (annaPlan.status === 'FINAL') {
+            const duties = await FacultyDuty.find({
+              examDate: annaPlan.examDate,
+              examSession: annaPlan.session
+            });
+            const dutyMap = {};
+            duties.forEach(d => {
+              const hId = d.hallId.toString();
+              if (!dutyMap[hId]) dutyMap[hId] = [];
+              dutyMap[hId].push(d.facultyId);
+            });
+            halls = halls.map(h => ({
+              ...h,
+              facultyAssigned: dutyMap[h._id.toString()] || []
+            }));
+          } else {
+            const faMap = {};
+            if (annaPlan.facultyAssignments && annaPlan.facultyAssignments.length > 0) {
+              annaPlan.facultyAssignments.forEach(fa => {
+                faMap[fa.hallId.toString()] = fa.facultyIds;
+              });
+            }
+            halls = halls.map(h => ({
+              ...h,
+              facultyAssigned: faMap[h._id.toString()] || h.facultyAssigned || []
+            }));
+          }
         }
       }
     }
@@ -166,19 +211,54 @@ export const getHallById = async (req, res) => {
 
     if (examSessionId) {
       const session = await ExamSession.findById(examSessionId);
-      if (session && session.status === 'FINAL') {
-        // Fetch duties for this FINAL session
-        const duties = await FacultyDuty.find({
-          examDate: session.examDate,
-          examSession: session.examSession,
-          hallId: hall._id
-        });
+      if (session) {
+        if (session.status === 'FINAL') {
+          // Fetch duties for this FINAL session
+          const duties = await FacultyDuty.find({
+            examDate: session.examDate,
+            examSession: session.examSession,
+            hallId: hall._id
+          });
 
-        // Override facultyAssigned
-        hall = {
-          ...hall,
-          facultyAssigned: duties.map(d => d.facultyId.toString())
-        };
+          // Override facultyAssigned
+          hall = {
+            ...hall,
+            facultyAssigned: duties.map(d => d.facultyId.toString())
+          };
+        } else {
+          // If DRAFT, source is ExamSession.facultyAssignments (AL-07) with fallback to global Hall.facultyAssigned
+          const assignment = (session.facultyAssignments || []).find(fa => fa.hallId.toString() === hall._id.toString());
+          if (assignment) {
+            hall = {
+              ...hall,
+              facultyAssigned: assignment.facultyIds
+            };
+          }
+        }
+      } else {
+        // Check if it's an Anna University plan
+        const annaPlan = await AnnaSeating.findById(examSessionId);
+        if (annaPlan) {
+          if (annaPlan.status === 'FINAL') {
+            const duties = await FacultyDuty.find({
+              examDate: annaPlan.examDate,
+              examSession: annaPlan.session,
+              hallId: hall._id
+            });
+            hall = {
+              ...hall,
+              facultyAssigned: duties.map(d => d.facultyId.toString())
+            };
+          } else {
+            const assignment = (annaPlan.facultyAssignments || []).find(fa => fa.hallId.toString() === hall._id.toString());
+            if (assignment) {
+              hall = {
+                ...hall,
+                facultyAssigned: assignment.facultyIds
+              };
+            }
+          }
+        }
       }
     }
 
@@ -256,7 +336,13 @@ export const updateHall = async (req, res) => {
     hall.name = name || hall.name;
     hall.rows = rows || hall.rows;
     hall.columns = columns || hall.columns;
-    hall.seatsPerBench = seatsPerBench || hall.seatsPerBench;
+    if (seatsPerBench !== undefined) {
+      let finalSeatsPerBench = Number(seatsPerBench);
+      if (hall.name.toUpperCase().includes("DH")) {
+        finalSeatsPerBench = 1;
+      }
+      hall.seatsPerBench = finalSeatsPerBench;
+    }
     hall.floor = floor || hall.floor;
 
     if (facultyRequired !== undefined) {
@@ -330,6 +416,68 @@ export const getAllExamDates = async (req, res) => {
     res.json(combined);
   } catch (error) {
     console.error("getAllExamDates error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/* ===============================
+   BULK CREATE HALLS
+================================ */
+export const bulkCreateHalls = async (req, res) => {
+  try {
+    const { halls } = req.body;
+
+    if (!halls || !Array.isArray(halls)) {
+      return res.status(400).json({ message: "Invalid halls data" });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const hallData of halls) {
+      try {
+        let { name, rows, columns, seatsPerBench, floor, facultyRequired } = hallData;
+
+        if (!name || !rows || !columns || !floor) {
+          errors.push({ name: name || "Unknown", message: "Missing required fields" });
+          continue;
+        }
+
+        // Check duplicate
+        const exists = await Hall.findOne({ name });
+        if (exists) {
+          // If exists, we skip or update? User said "simplify creation", usually skip or error.
+          errors.push({ name, message: "Hall already exists" });
+          continue;
+        }
+
+        let finalSeatsPerBench = Number(seatsPerBench) || 1;
+        if (name.toUpperCase().includes("DH")) {
+          finalSeatsPerBench = 1;
+        }
+
+        const newHall = await Hall.create({
+          name,
+          rows: Number(rows),
+          columns: Number(columns),
+          seatsPerBench: finalSeatsPerBench,
+          floor,
+          facultyRequired: Number(facultyRequired) || 1
+        });
+
+        results.push(newHall);
+      } catch (err) {
+        errors.push({ name: hallData.name || "Unknown", message: err.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      created: results.length,
+      errors: errors
+    });
+  } catch (error) {
+    console.error("Bulk create halls error:", error);
     res.status(500).json({ error: error.message });
   }
 };

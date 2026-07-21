@@ -9,6 +9,8 @@ const assignmentSchema = new mongoose.Schema({
   rollNumber: String,
   subjectCode: String,
   department: String,
+  isAbsent: { type: Boolean, default: false },
+  markedAbsentAt: { type: Date, default: null },
 });
 
 const AnnaSeatingSchema = new mongoose.Schema({
@@ -22,7 +24,16 @@ const AnnaSeatingSchema = new mongoose.Schema({
   },
   assignments: [assignmentSchema],
   status: { type: String, default: "DRAFT" },
-  isPublished: { type: Boolean, default: false }
+  isPublished: { type: Boolean, default: false },
+  facultyAssignments: [{
+    hallId: { type: mongoose.Schema.Types.ObjectId, ref: 'Hall' },
+    facultyIds: [String]
+  }]
 }, { timestamps: true });
+
+AnnaSeatingSchema.index(
+  { examDate: 1, session: 1 },
+  { unique: true }
+);
 
 export default mongoose.models.AnnaSeating || mongoose.model("AnnaSeating", AnnaSeatingSchema);

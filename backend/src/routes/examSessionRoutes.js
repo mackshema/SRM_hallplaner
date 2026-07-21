@@ -1,4 +1,5 @@
 import express from "express";
+import { requireAdmin } from "../middleware/authMiddleware.js";
 import {
     getExamSessions,
     createExamSession,
@@ -9,6 +10,7 @@ import {
 } from "../controllers/examSessionController.js";
 
 const router = express.Router();
+router.use(requireAdmin);
 
 router.get("/", getExamSessions);
 router.post("/", createExamSession);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -53,7 +53,9 @@ const SeatingPlans = () => {
     institutionAffiliation: "",
     examCellName: "",
     academicYear: "",
-    examName: ""
+    examName: "",
+    leftLogo: "",
+    rightLogo: ""
   });
   const [halls, setHalls] = useState<Hall[]>([]);
 
@@ -64,9 +66,11 @@ const SeatingPlans = () => {
   const [examSessions, setExamSessions] = useState<ExamSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [selectedSessionAssignments, setSelectedSessionAssignments] = useState<any[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const fetchSeatingPlan = async (sessionId: string) => {
     setSelectedSessionId(sessionId);
+    setSearchParams({ sessionId });
     const assignments = await db.getAllSeatAssignments(sessionId);
     setSelectedSessionAssignments(assignments);
   };
@@ -120,7 +124,7 @@ const SeatingPlans = () => {
       ...g,
       count: g.rollNumbers.length,
       formatted: formatRolls(g.rollNumbers)
-    })).sort((a: any, b: any) => String(a.hallName || '').localeCompare(String(b.hallName || '')));
+    })).sort((a: any, b: any) => String(a.hallName || '').localeCompare(String(b.hallName || ''), undefined, { numeric: true }));
   }, [selectedSessionAssignments, halls]);
 
   // Derive the list of halls that actually have students in the current session
@@ -134,7 +138,7 @@ const SeatingPlans = () => {
     return halls
       .filter(h => hallStudentCount[h._id] > 0)
       .map(h => ({ hall: h, studentCount: hallStudentCount[h._id] }))
-      .sort((a, b) => String(a.hall.name).localeCompare(String(b.hall.name)));
+      .sort((a, b) => String(a.hall.name).localeCompare(String(b.hall.name), undefined, { numeric: true }));
   }, [selectedSessionAssignments, halls]);
 
   const [creatingSession, setCreatingSession] = useState(false);
@@ -166,17 +170,25 @@ const SeatingPlans = () => {
         const hallsData = await db.getAllHalls();
         setHalls(hallsData);
 
-
-
         // Fetch Exam Sessions
         const sessionsData = await db.getExamSessions();
         setExamSessions(sessionsData);
 
-        // Select latest or first if available and none selected
-        if (sessionsData.length > 0 && !selectedSessionId) {
-          // Default to the last created (assumed bottom or top based on sort)
-          // Controller sorts by examDate asc. Maybe default to last?
-          setSelectedSessionId(sessionsData[sessionsData.length - 1]._id);
+        // Session Selection Priority:
+        // 1. URL search param (?sessionId=...)
+        // 2. Already set selectedSessionId
+        // 3. Fallback to latest session in sessionsData
+        const sessionIdParam = searchParams.get("sessionId");
+        let targetId = sessionIdParam || selectedSessionId;
+
+        if (!targetId && sessionsData.length > 0) {
+          targetId = sessionsData[sessionsData.length - 1]._id;
+        }
+
+        if (targetId) {
+          setSelectedSessionId(targetId);
+          const assignments = await db.getAllSeatAssignments(targetId);
+          setSelectedSessionAssignments(assignments);
         }
 
         const settingsRes = await fetch("http://localhost:5000/api/settings");
@@ -204,10 +216,20 @@ const SeatingPlans = () => {
       });
       const data = await res.json();
       if (data.success) {
-         toast({ title: "Success", description: `Updated mapping for ${data.updatedSubjects} subjects.` });
+         toast({ 
+           title: "Timetable & Plans Updated", 
+           description: `${data.message}${data.generation ? ` Generated ${data.generation.count} sessions.` : ""}` 
+         });
          setLastUploadedName(timetableFile.name);
          localStorage.setItem('internal_timetable_filename', timetableFile.name);
          setTimetableFile(null);
+         
+         // Refresh sessions list
+         const sessionsData = await db.getExamSessions();
+         setExamSessions(sessionsData);
+         if (sessionsData.length > 0) {
+            fetchSeatingPlan(sessionsData[sessionsData.length - 1]._id);
+         }
       } else toast({ title: "Error", description: data.error, variant: "destructive" });
     } catch(e) {
       toast({ title: "Error", description: "Failed to upload", variant: "destructive" });
@@ -243,6 +265,7 @@ const SeatingPlans = () => {
       await db.deleteExamSession(selectedSessionId);
       setExamSessions(prev => prev.filter(s => s._id !== selectedSessionId));
       setSelectedSessionId("");
+      setSelectedSessionAssignments([]);
       setShowDeleteSessionDialog(false);
       toast({ title: "Success", description: "Exam session deleted successfully" });
     } catch (err: any) {
@@ -310,24 +333,86 @@ const SeatingPlans = () => {
   const [facultySuggestions, setFacultySuggestions] = useState<any[]>([]);
   const [tempDemandFacultyIds, setTempDemandFacultyIds] = useState<string[]>([]);
 
+  const [newFacultyForm, setNewFacultyForm] = useState({
+    name: "",
+    username: "",
+    department: ""
+  });
+  const [creatingInstantFaculty, setCreatingInstantFaculty] = useState(false);
+
+  const handleInstantCreateFaculty = async () => {
+    if (!newFacultyForm.name.trim() || !newFacultyForm.username.trim() || !newFacultyForm.department.trim()) {
+      toast({ title: "Error", description: "Please fill all faculty fields", variant: "destructive" });
+      return;
+    }
+
+    const nameRegex = /^.+\.\s*.+$/;
+    if (!nameRegex.test(newFacultyForm.name)) {
+      toast({
+        title: "Invalid Name Format",
+        description: "Name must include initial and full name (Example: R. Kumar).",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setCreatingInstantFaculty(true);
+    try {
+      const added = await db.addFaculty({
+        name: newFacultyForm.name.trim(),
+        username: newFacultyForm.username.trim(),
+        department: newFacultyForm.department.trim(),
+        password: "faculty123",
+        designation: "Assistant Professor",
+        facultyEmail: `${newFacultyForm.username.trim()}@institution.edu`,
+        hodEmail: `hod.${newFacultyForm.department.trim().toLowerCase()}@institution.edu`
+      });
+
+      toast({ title: "Success", description: `Faculty ${added.name} created instantly.` });
+
+      setFacultySuggestions(prev => [...prev, { id: added._id || added.id, name: added.name, department: added.department }]);
+      setTempDemandFacultyIds(prev => [...prev, String(added._id || added.id)]);
+      setNewFacultyForm({ name: "", username: "", department: "" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to create faculty", variant: "destructive" });
+    } finally {
+      setCreatingInstantFaculty(false);
+    }
+  };
+
   const handleBulkTimetableGeneration = async () => {
     setGenerating(true);
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       const res = await fetch(`${API_URL}/internal-timetable/generate-all-seating`, {
-         method: 'POST'
+         method: 'POST',
+         headers: {
+           'Content-Type': 'application/json'
+         },
+         body: JSON.stringify({ demandFacultyIds: tempDemandFacultyIds })
       });
       const data = await res.json();
       if (data.success) {
          const sessionWord = data.count === 1 ? 'session' : 'sessions';
-         toast({ title: 'Generation Complete', description: `Generated ${data.count} ${sessionWord}.${data.skipped > 0 ? ` Skipped ${data.skipped} existing.` : ''}` });
+
+         // AL-03: show warning toast if seat deadlocks occurred, otherwise normal success
+         if (data.warnings && data.warnings.length > 0) {
+           toast({
+             title: '⚠️ Generation Complete with Warnings',
+             description: `Generated ${data.count} ${sessionWord}. ${data.warnings.length} seat(s) could not be filled due to constraint deadlocks. Review before finalizing.${data.skipped > 0 ? ` Skipped ${data.skipped} existing.` : ''}`,
+             variant: 'destructive'
+           });
+           console.table(data.warnings); // full detail in console
+         } else {
+           toast({ title: 'Generation Complete', description: `Generated ${data.count} ${sessionWord}.${data.skipped > 0 ? ` Skipped ${data.skipped} existing.` : ''}` });
+         }
 
          // Refresh sessions
          const sessionsData = await db.getExamSessions();
          setExamSessions(sessionsData);
-         if (sessionsData.length > 0 && !selectedSessionId) {
-            setSelectedSessionId(sessionsData[sessionsData.length - 1]._id);
-         }
+          if (sessionsData.length > 0 && !selectedSessionId) {
+             fetchSeatingPlan(sessionsData[sessionsData.length - 1]._id);
+          }
 
          // Show shortage popup if faculty couldn't be fully allocated
          if (data.shortage && data.allocationWarnings && data.allocationWarnings.length > 0) {
@@ -348,7 +433,6 @@ const SeatingPlans = () => {
 
   const handleApplyDemand = () => {
     setShowShortageDialog(false);
-    // TODO: implement apply demand flow in bulk generation if supported by backend
     handleBulkTimetableGeneration();
   };
 
@@ -395,6 +479,19 @@ const SeatingPlans = () => {
 
       doc.setFontSize(14);
       doc.text(settings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY", centerX, 22, { align: "center" });
+
+      if (settings.leftLogo) {
+        try {
+          const format = settings.leftLogo.substring(settings.leftLogo.indexOf('/') + 1, settings.leftLogo.indexOf(';')).toUpperCase();
+          doc.addImage(settings.leftLogo, format, 14, 8, 20, 20);
+        } catch (e) { console.error("Logo error", e); }
+      }
+      if (settings.rightLogo) {
+        try {
+          const format = settings.rightLogo.substring(settings.rightLogo.indexOf('/') + 1, settings.rightLogo.indexOf(';')).toUpperCase();
+          doc.addImage(settings.rightLogo, format, pageWidth - 34, 8, 20, 20);
+        } catch (e) { console.error("Logo error", e); }
+      }
 
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
@@ -556,7 +653,7 @@ const SeatingPlans = () => {
               <ExcelUploadHelper
                 columns={[
                   { header: "Subject Code", example: "CS3401",      required: true, description: "Subject code" },
-                  { header: "Year",         example: "Second Year",  required: true, description: "Student year/batch" },
+                  { header: "Year",         example: "Year 2",  required: true, description: "Student year/batch" },
                   { header: "Department",   example: "CSE",          required: true, description: "Dept abbreviation" },
                   { header: "Date",         example: "2025-04-15",   required: true, description: "YYYY-MM-DD" },
                   { header: "Session",      example: "FN",           required: true, description: "FN or AN" },
@@ -886,6 +983,53 @@ const SeatingPlans = () => {
                   </div>
                 ))}
                 {facultySuggestions.length === 0 && <p className="text-sm italic text-gray-500 col-span-2 text-center py-4">No other available faculty found. Please add new faculty in the Faculty tab.</p>}
+              </div>
+            </div>
+
+            {/* Instant Faculty Creation Form */}
+            <div className="border-t pt-4">
+              <p className="text-sm font-bold mb-2 text-slate-800">Instantly Add New Faculty Member:</p>
+              <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div>
+                  <Label htmlFor="inst-name" className="text-xs text-slate-600">Full Name (Format: R. Kumar)</Label>
+                  <Input 
+                    id="inst-name"
+                    placeholder="e.g. R. Kumar" 
+                    value={newFacultyForm.name} 
+                    onChange={e => setNewFacultyForm(prev => ({ ...prev, name: e.target.value }))}
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="inst-username" className="text-xs text-slate-600">Username / Faculty ID</Label>
+                  <Input 
+                    id="inst-username"
+                    placeholder="e.g. fac_rkumar" 
+                    value={newFacultyForm.username} 
+                    onChange={e => setNewFacultyForm(prev => ({ ...prev, username: e.target.value }))}
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Label htmlFor="inst-dept" className="text-xs text-slate-600">Department</Label>
+                    <Input 
+                      id="inst-dept"
+                      placeholder="e.g. CSE" 
+                      value={newFacultyForm.department} 
+                      onChange={e => setNewFacultyForm(prev => ({ ...prev, department: e.target.value }))}
+                      className="h-8 text-xs mt-1"
+                    />
+                  </div>
+                  <Button 
+                    size="sm" 
+                    onClick={handleInstantCreateFaculty} 
+                    disabled={creatingInstantFaculty}
+                    className="h-8 text-xs bg-slate-800 hover:bg-slate-900 text-white"
+                  >
+                    {creatingInstantFaculty ? "Adding..." : "Add"}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

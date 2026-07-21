@@ -22,7 +22,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { X } from "lucide-react";
+import { X, FileSpreadsheet } from "lucide-react";
+import * as XLSX from 'xlsx';
 import {
   Table,
   TableBody,
@@ -68,7 +69,7 @@ const HallsManagement = () => {
   const [formData, setFormData] = useState({
     name: "",
     rows: 5,
-    columns: 5,
+    columns: 3,
     seatsPerBench: 3,
     facultyRequired: 1, // Default to 1
     floor: "Ground Floor"
@@ -146,7 +147,7 @@ const HallsManagement = () => {
     setFormData({
       name: "",
       rows: 5,
-      columns: 5,
+      columns: 3,
       seatsPerBench: 3,
       facultyRequired: 1,
       floor: "Ground Floor",
@@ -279,8 +280,72 @@ const HallsManagement = () => {
         title: "Failed to delete hall",
         description: "An error occurred while deleting the hall.",
         variant: "destructive",
-      });
+        });
     }
+  };
+
+  const handleExcelUpload = async (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet);
+
+        if (json.length === 0) {
+          toast({ title: "Error", description: "Excel file is empty", variant: "destructive" });
+          return;
+        }
+
+        // Validate and format
+        const formattedHalls = json.map((row: any) => ({
+          name: String(row.Name || row.name || row.HallNumber || row['Hall Number'] || ""),
+          rows: Number(row.Rows || row.rows || 0),
+          columns: Number(row.Columns || row.columns || 0),
+          seatsPerBench: Number(row.SeatsPerBench || row['Seats Per Bench'] || 1),
+          floor: String(row.Floor || row.floor || "Ground Floor"),
+          facultyRequired: Number(row.FacultyRequired || row['Faculty Required'] || 1)
+        })).filter(h => h.name && h.rows > 0 && h.columns > 0);
+
+        if (formattedHalls.length === 0) {
+          toast({ title: "Error", description: "No valid hall data found in Excel", variant: "destructive" });
+          return;
+        }
+
+        setLoading(true);
+        const res = await fetch("http://localhost:5000/api/halls/bulk-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ halls: formattedHalls }),
+        });
+
+        if (!res.ok) throw new Error("Failed to upload halls");
+
+        const result = await res.json();
+        
+        // Refresh halls list
+        const hallsRes = await fetch("http://localhost:5000/api/halls");
+        if (hallsRes.ok) {
+          const hallsData = await hallsRes.json();
+          setHalls(hallsData || []);
+        }
+
+        toast({
+          title: "Upload Successful",
+          description: `Created ${result.created} halls. ${result.errors.length} errors.`,
+          variant: result.errors.length > 0 ? "default" : "default"
+        });
+
+      } catch (error) {
+        console.error("Excel upload error:", error);
+        toast({ title: "Upload Failed", description: "An error occurred while processing the Excel file.", variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   if (loading) {
@@ -422,10 +487,12 @@ const HallsManagement = () => {
     }
   };
 
-  const filteredHalls = halls.filter(hall =>
-    hall.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (hall.floor && hall.floor.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredHalls = halls
+    .filter(hall =>
+      hall.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (hall.floor && hall.floor.toLowerCase().includes(searchQuery.toLowerCase()))
+    )
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
   const allSelected = filteredHalls.length > 0 && filteredHalls.every(h => isHallActiveInSession(h._id));
 
@@ -502,102 +569,126 @@ const HallsManagement = () => {
             )}
           </div>
 
-          <Dialog open={open} onOpenChange={(val) => {
-            setOpen(val);
-            if (!val) resetForm();
-          }}>
-            <DialogTrigger asChild>
-              <Button>Create New Hall</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>{selectedHall ? "Edit Exam Hall" : "Create New Exam Hall"}</DialogTitle>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="name">Hall Name</Label>
-                  <Input
-                    id="name"
-                    name="name"
-                    placeholder="Enter hall name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex gap-2" asChild>
+              <label className="cursor-pointer">
+                <FileSpreadsheet className="h-4 w-4" />
+                Excel Upload
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleExcelUpload(file);
+                    e.target.value = ''; // Reset
+                  }}
+                />
+              </label>
+            </Button>
+            <Dialog open={open} onOpenChange={(val) => {
+              setOpen(val);
+              if (!val) resetForm();
+            }}>
+              <DialogTrigger asChild>
+                <Button>Create New Hall</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{selectedHall ? "Edit Exam Hall" : "Create New Exam Hall"}</DialogTitle>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="rows">Rows</Label>
+                    <Label htmlFor="name">Hall Name</Label>
                     <Input
-                      id="rows"
-                      name="rows"
-                      type="number"
-                      min="1"
-                      value={formData.rows}
+                      id="name"
+                      name="name"
+                      placeholder="Enter hall name (e.g. 101, 110DH)"
+                      value={formData.name}
                       onChange={handleInputChange}
                     />
+                    {formData.name.toUpperCase().includes("DH") && (
+                      <p className="text-xs text-amber-600 font-medium italic">
+                        Note: Drawing Halls (DH) are limited to 1 student per bench.
+                      </p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="rows">Rows</Label>
+                      <Input
+                        id="rows"
+                        name="rows"
+                        type="number"
+                        min="1"
+                        value={formData.rows}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="columns">Columns</Label>
+                      <Input
+                        id="columns"
+                        name="columns"
+                        type="number"
+                        min="1"
+                        value={formData.columns}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="seatsPerBench">Seats Per Bench</Label>
+                      <Input
+                        id="seatsPerBench"
+                        name="seatsPerBench"
+                        type="number"
+                        min="1"
+                        disabled={formData.name.toUpperCase().includes("DH")}
+                        value={formData.name.toUpperCase().includes("DH") ? 1 : formData.seatsPerBench}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="facultyRequired">Faculty Required</Label>
+                      <Input
+                        id="facultyRequired"
+                        name="facultyRequired"
+                        type="number"
+                        min="1"
+                        value={formData.facultyRequired}
+                        onChange={handleInputChange}
+                      />
+                    </div>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="columns">Columns</Label>
-                    <Input
-                      id="columns"
-                      name="columns"
-                      type="number"
-                      min="1"
-                      value={formData.columns}
-                      onChange={handleInputChange}
-                    />
+                    <Label htmlFor="floor">Floor</Label>
+                    <Select
+                      onValueChange={handleFloorChange}
+                      value={formData.floor}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select floor" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-background z-50">
+                        <SelectItem value="Ground Floor">Ground Floor</SelectItem>
+                        <SelectItem value="First Floor">First Floor</SelectItem>
+                        <SelectItem value="Second Floor">Second Floor</SelectItem>
+                        <SelectItem value="Third Floor">Third Floor</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="seatsPerBench">Seats Per Bench</Label>
-                    <Input
-                      id="seatsPerBench"
-                      name="seatsPerBench"
-                      type="number"
-                      min="1"
-                      value={formData.seatsPerBench}
-                      onChange={handleInputChange}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="facultyRequired">Faculty Required</Label>
-                    <Input
-                      id="facultyRequired"
-                      name="facultyRequired"
-                      type="number"
-                      min="1"
-                      value={formData.facultyRequired}
-                      onChange={handleInputChange}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="floor">Floor</Label>
-                  <Select
-                    onValueChange={handleFloorChange}
-                    value={formData.floor}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select floor" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-background z-50">
-                      <SelectItem value="Ground Floor">Ground Floor</SelectItem>
-                      <SelectItem value="First Floor">First Floor</SelectItem>
-                      <SelectItem value="Second Floor">Second Floor</SelectItem>
-                      <SelectItem value="Third Floor">Third Floor</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => { setOpen(false); resetForm(); }}>
-                  Cancel
-                </Button>
-                <Button onClick={handleSaveHall}>{selectedHall ? "Update Hall" : "Create Hall"}</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => { setOpen(false); resetForm(); }}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveHall}>{selectedHall ? "Update Hall" : "Create Hall"}</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </div>
 
@@ -672,6 +763,62 @@ const HallsManagement = () => {
                       >
                         Configure
                       </Button>
+                      {hall.name.toUpperCase().includes("DH") && !hall.name.toUpperCase().match(/DH[AB]$/) && hall.rows > 1 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                          onClick={async () => {
+                            if (!confirm(`Divide Drawing Hall ${hall.name} into A and B? Current configuration will be split.`)) return;
+                            
+                            const halfRows = Math.floor(hall.rows / 2);
+                            const remRows = hall.rows - halfRows;
+
+                            const hallsToCreate = [
+                              {
+                                name: `${hall.name}A`,
+                                rows: halfRows || 1,
+                                columns: hall.columns,
+                                seatsPerBench: 1,
+                                floor: hall.floor,
+                                facultyRequired: 1
+                              },
+                              {
+                                name: `${hall.name}B`,
+                                rows: remRows,
+                                columns: hall.columns,
+                                seatsPerBench: 1,
+                                floor: hall.floor,
+                                facultyRequired: 1
+                              }
+                            ];
+
+                            try {
+                              setLoading(true);
+                              // Create AB
+                              await fetch("http://localhost:5000/api/halls/bulk-create", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ halls: hallsToCreate }),
+                              });
+                              // Delete original
+                              await fetch(`http://localhost:5000/api/halls/${hall._id}`, { method: "DELETE" });
+                              
+                              // Refresh
+                              const res = await fetch("http://localhost:5000/api/halls");
+                              if (res.ok) setHalls(await res.json());
+                              
+                              toast({ title: "Hall Divided", description: `${hall.name} split into A and B.` });
+                            } catch (err) {
+                              toast({ title: "Error", description: "Failed to divide hall.", variant: "destructive" });
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                        >
+                          Divide
+                        </Button>
+                      )}
                       <Button
                         variant="secondary"
                         size="sm"

@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import { requireAdmin } from '../middleware/authMiddleware.js';
 import { downloadAnnaExamPackage, downloadAnnaConsolidated, downloadAnnaLayouts } from '../controllers/exportController.js';
 import {
   uploadStudents,
@@ -16,6 +17,7 @@ import {
 } from '../controllers/annaUniversityController.js';
 
 const router = express.Router();
+router.use(requireAdmin);
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/data', getExamData);

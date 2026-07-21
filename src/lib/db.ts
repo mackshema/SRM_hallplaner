@@ -163,7 +163,11 @@ class DatabaseService {
         body: JSON.stringify({ username, password })
       });
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        if (data.token) {
+          localStorage.setItem('token', data.token);
+        }
+        return data.user || data;
       }
 
       const users = await this.getAllUsers();
@@ -326,7 +330,7 @@ class DatabaseService {
     skipRollNumbers: string[] = [],
     manualRollNumbers: string[] = [],
     demandFacultyIds: string[] = []
-  ): Promise<{ success: boolean; unallocated: string[]; allocationResult?: any }> {
+  ): Promise<{ success: boolean; unallocated: string[]; allocationResult?: any; warnings?: any[]; warningCount?: number }> {
     try {
       // Backend now derives departments dynamically from student database
       const res = await fetch(`${this.apiUrl}/seating/generate`, {
@@ -351,7 +355,9 @@ class DatabaseService {
       return {
         success: data.success || false,
         unallocated: data.unallocated || [],
-        allocationResult: data.allocationResult
+        allocationResult: data.allocationResult,
+        warnings: data.warnings || [],          // AL-03: pass through seat deadlock warnings
+        warningCount: data.warningCount || 0    // AL-03: convenience count
       };
     } catch (error) {
       console.error("Error generating plans:", error);

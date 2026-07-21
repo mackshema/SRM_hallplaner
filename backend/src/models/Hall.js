@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 const hallSchema = new mongoose.Schema({
-  name: { type: String, required: true },
+  name: { type: String, required: true, unique: true, trim: true },
   rows: { type: Number, required: true },
   columns: { type: Number, required: true },
   seatsPerBench: { type: Number, required: true },
@@ -16,6 +16,10 @@ const hallSchema = new mongoose.Schema({
     offsetY: Number
   }],
 
+  // DEPRECATED (AL-07): use ExamSession.facultyAssignments instead.
+  // Hall is a global physical room — storing assignments here caused cross-session
+  // overwrites when two sessions were generated concurrently.
+  // Kept for backward compatibility with pre-AL-07 finalized sessions.
   facultyAssigned: [String], // Store faculty IDs as strings (from localStorage)
 
   examDate: String,

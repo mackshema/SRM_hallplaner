@@ -73,7 +73,13 @@ const SeatingPlanDetails = () => {
     return (
       <div className="p-8 text-center">
         <p className="text-red-500">Hall not found or invalid hall ID.</p>
-        <Button className="mt-4" onClick={() => navigate("/admin/seating-plans")}>
+        <Button
+          className="mt-4"
+          onClick={() => {
+            const sessionId = searchParams.get("examSessionId");
+            navigate(sessionId ? `/admin/seating-plans?sessionId=${sessionId}` : "/admin/seating-plans");
+          }}
+        >
           Back to Seating Plans
         </Button>
       </div>
@@ -94,7 +100,10 @@ const SeatingPlanDetails = () => {
 
         <Button
           variant="outline"
-          onClick={() => navigate("/admin/seating-plans")}
+          onClick={() => {
+            const sessionId = searchParams.get("examSessionId");
+            navigate(sessionId ? `/admin/seating-plans?sessionId=${sessionId}` : "/admin/seating-plans");
+          }}
         >
           Back to All Plans
         </Button>

@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import { requireAdmin } from '../middleware/authMiddleware.js';
 import { 
     getExamData, 
     uploadTimetable, 
@@ -9,6 +10,7 @@ import {
 } from '../controllers/internalTimetableController.js';
 
 const router = express.Router();
+router.use(requireAdmin);
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/data', getExamData);

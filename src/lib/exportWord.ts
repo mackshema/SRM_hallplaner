@@ -11,6 +11,8 @@ import {
   HeadingLevel,
   WidthType,
   PageOrientation,
+  ImageRun,
+  BorderStyle,
 } from "docx";
 
 export type ExportWordOptions = {
@@ -21,10 +23,26 @@ export type ExportWordOptions = {
   rows: (string | number | null | undefined)[][];
   footerText?: string;
   landscape?: boolean;
+  leftLogo?: string;
+  rightLogo?: string;
+  institutionSubtitle?: string;
+  institutionAffiliation?: string;
 };
 
 export async function exportTableAsDoc(options: ExportWordOptions) {
-  const { filename, title, generatedOn, headers, rows, footerText, landscape = false } = options;
+  const { 
+    filename, 
+    title, 
+    generatedOn, 
+    headers, 
+    rows, 
+    footerText, 
+    landscape = false,
+    leftLogo,
+    rightLogo,
+    institutionSubtitle,
+    institutionAffiliation
+  } = options;
 
   console.log("📄 exportTableAsDoc()", {
     filename,
@@ -126,19 +144,110 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
   // -------------------------
   const children: (Paragraph | Table)[] = [];
 
-  // Title
-  // Split title by newline if present to support multiline titles
-  const titleLines = title.split('\n');
-  titleLines.forEach(line => {
+  // Header with Logos if provided
+  if (leftLogo || rightLogo) {
     children.push(
-      new Paragraph({
-        text: line,
-        heading: HeadingLevel.HEADING1,
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 100 },
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: {
+          top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+          bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+          left: { style: BorderStyle.NONE, size: 0, color: "auto" },
+          right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+          insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "auto" },
+          insideVertical: { style: BorderStyle.NONE, size: 0, color: "auto" },
+        },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 15, type: WidthType.PERCENTAGE },
+                children: [
+                  leftLogo ? (() => {
+                    try {
+                      return new Paragraph({
+                        children: [
+                          new ImageRun({
+                            data: Uint8Array.from(atob(leftLogo.split(",")[1]), c => c.charCodeAt(0)),
+                            transformation: { width: 60, height: 60 },
+                            type: "png"
+                          })
+                        ],
+                        alignment: AlignmentType.LEFT
+                      });
+                    } catch (e) { return new Paragraph(""); }
+                  })() : new Paragraph(""),
+                ],
+              }),
+              new TableCell({
+                width: { size: 70, type: WidthType.PERCENTAGE },
+                children: [
+                  new Paragraph({
+                    text: title.split('\n')[0] || "",
+                    heading: HeadingLevel.HEADING1,
+                    alignment: AlignmentType.CENTER,
+                  }),
+                  institutionSubtitle ? new Paragraph({
+                    text: institutionSubtitle,
+                    alignment: AlignmentType.CENTER,
+                  }) : new Paragraph(""),
+                  institutionAffiliation ? new Paragraph({
+                    text: institutionAffiliation,
+                    alignment: AlignmentType.CENTER,
+                  }) : new Paragraph(""),
+                ],
+              }),
+              new TableCell({
+                width: { size: 15, type: WidthType.PERCENTAGE },
+                children: [
+                  rightLogo ? (() => {
+                    try {
+                      return new Paragraph({
+                        children: [
+                          new ImageRun({
+                            data: Uint8Array.from(atob(rightLogo.split(",")[1]), c => c.charCodeAt(0)),
+                            transformation: { width: 60, height: 60 },
+                            type: "png"
+                          })
+                        ],
+                        alignment: AlignmentType.RIGHT
+                      });
+                    } catch (e) { return new Paragraph(""); }
+                  })() : new Paragraph(""),
+                ],
+              }),
+            ],
+          }),
+        ],
       })
     );
-  });
+
+    // Remaining title lines if any
+    const titleLines = title.split('\n').slice(1);
+    titleLines.forEach(line => {
+      children.push(
+        new Paragraph({
+          text: line,
+          heading: HeadingLevel.HEADING2,
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 100 },
+        })
+      );
+    });
+  } else {
+    // Standard title
+    const titleLines = title.split('\n');
+    titleLines.forEach(line => {
+      children.push(
+        new Paragraph({
+          text: line,
+          heading: HeadingLevel.HEADING1,
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 100 },
+        })
+      );
+    });
+  }
 
   if (generatedOn) {
     children.push(

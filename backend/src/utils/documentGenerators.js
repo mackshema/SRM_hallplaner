@@ -319,7 +319,7 @@ export const generateBenchLayoutDocx = async ({
         const c = (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
         if (r >= 0 && c >= 0 && a.studentRollNumber) {
             if (!seatGrid[r]) seatGrid[r] = Array(maxCol).fill("");
-            seatGrid[r][c] = a.studentRollNumber;
+            seatGrid[r][c] = a.isAbsent ? `${a.studentRollNumber} (ABS)` : a.studentRollNumber;
         }
     });
 
@@ -372,9 +372,11 @@ export const generateBenchLayoutDocx = async ({
         allColumns.forEach((actualCol) => {
             const rollNumber = seatGrid[r][actualCol] || "";
             const isBoldColumn = actualCol % 2 === 0;
+            const isAbsent = rollNumber.includes("(ABS)");
             rowCells.push(
                 new TableCell({
                     width: { size: 95 / allColumns.length, type: WidthType.PERCENTAGE },
+                    shading: isAbsent ? { fill: "FCEBEB" } : undefined,
                     children: [
                         new Paragraph({
                             children: [
@@ -383,6 +385,7 @@ export const generateBenchLayoutDocx = async ({
                                     bold: !!rollNumber && isBoldColumn,
                                     italics: !!rollNumber && !isBoldColumn,
                                     size: 14, // 7pt
+                                    color: isAbsent ? "FF0000" : undefined,
                                 }),
                             ],
                             alignment: AlignmentType.CENTER,
@@ -627,7 +630,7 @@ export const generateAllBenchLayoutsDocx = async ({
             const c = (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
             if (r >= 0 && c >= 0 && a.studentRollNumber) {
                 if (!seatGrid[r]) seatGrid[r] = Array(maxCol).fill("");
-                seatGrid[r][c] = a.studentRollNumber;
+                seatGrid[r][c] = a.isAbsent ? `${a.studentRollNumber} (ABS)` : a.studentRollNumber;
             }
         });
 
@@ -658,9 +661,20 @@ export const generateAllBenchLayoutsDocx = async ({
             }));
             allColumns.forEach((actualCol) => {
                 const rollNumber = seatGrid[r][actualCol] || "";
+                const isAbsent = rollNumber.includes("(ABS)");
                 rowCells.push(new TableCell({
                     width: { size: colWidth, type: WidthType.PERCENTAGE },
-                    children: [new Paragraph({ children: [new TextRun({ text: rollNumber, bold: !!rollNumber && (actualCol % 2 === 0), italics: !!rollNumber && !(actualCol % 2 === 0), size: 14 })], alignment: AlignmentType.CENTER })]
+                    shading: isAbsent ? { fill: "FCEBEB" } : undefined,
+                    children: [new Paragraph({
+                        children: [new TextRun({
+                            text: rollNumber,
+                            bold: !!rollNumber && (actualCol % 2 === 0),
+                            italics: !!rollNumber && !(actualCol % 2 === 0),
+                            size: 14,
+                            color: isAbsent ? "FF0000" : undefined,
+                        })],
+                        alignment: AlignmentType.CENTER
+                    })]
                 }));
             });
             gridRows.push(new TableRow({ children: rowCells }));

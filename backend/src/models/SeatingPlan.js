@@ -14,4 +14,9 @@ const SeatingPlanSchema = new mongoose.Schema({
     isFinalized: { type: Boolean, default: false }
 }, { timestamps: true });
 
+SeatingPlanSchema.index(
+    { examDate: 1, examSession: 1 },
+    { unique: true }
+);
+
 export default mongoose.model("SeatingPlan", SeatingPlanSchema);

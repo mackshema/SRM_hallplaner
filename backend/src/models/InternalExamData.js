@@ -10,4 +10,18 @@ const internalExamDataSchema = new mongoose.Schema({
   studentName: { type: String }
 }, { timestamps: true });
 
+internalExamDataSchema.index({
+  examDate: 1,
+  session: 1,
+  department: 1
+});
+
+// Also add a unique constraint to prevent duplicate timetable entries
+internalExamDataSchema.index({
+  subjectCode: 1,
+  department: 1,
+  examDate: 1,
+  session: 1
+}, { unique: true });
+
 export default mongoose.model("InternalExamData", internalExamDataSchema);

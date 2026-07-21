@@ -4,14 +4,17 @@ const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     username: { type: String, required: true, unique: true },
-    password: { type: String, required: true }, // In production, hash this! (hashed for students via bcrypt)
+    password: { type: String, required: true }, // Hashed password
     email: { type: String }, // For student accounts
     role: {
       type: String,
       enum: ["admin", "faculty", "student"], // Lowercase to match frontend
       default: "faculty"
     },
-    department: { type: String }, // Optional for faculty
+    department: {
+      type: String,
+      required: function() { return this.role === 'student'; }
+    }, // Optional for faculty
     designation: { 
       type: String, 
       enum: ["Assistant Professor", "Associate Professor", "Professor", "HOD", ""]
@@ -24,8 +27,14 @@ const userSchema = new mongoose.Schema(
     lastDutyDate: { type: Date },
 
     isSelected: { type: Boolean, default: true },
-    program: { type: String }, // 'Engineering', 'MBA', etc.
-    degree: { type: String } // For grouping students by Year/Degree
+    program: {
+      type: String,
+      required: function() { return this.role === 'student'; }
+    }, // 'Engineering', 'MBA', etc.
+    degree: {
+      type: String,
+      required: function() { return this.role === 'student'; }
+    } // For grouping students by Year/Degree
   },
   { timestamps: true }
 );

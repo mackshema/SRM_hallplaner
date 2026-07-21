@@ -28,3 +28,10 @@ dist-ssr
 backend/.env
 *.env
 .env.local
+.env.*
+
+# Backend Logs
+backend/logs/
+
+# Backups
+backend/backups/
