@@ -104,6 +104,24 @@ export const createHall = async (req, res) => {
   }
 };
 
+/* ===============================
+   GET FLOORS (derived from halls)
+================================ */
+export const getFloors = async (req, res) => {
+  try {
+    const halls = await Hall.find({}, 'floor').lean();
+    const floorsSet = new Set();
+    halls.forEach(h => { if (h.floor && h.floor.trim()) floorsSet.add(h.floor.trim()); });
+    // Also include any hardcoded defaults so empty state shows something
+    ['Ground Floor', 'First Floor', 'Second Floor', 'Third Floor'].forEach(f => floorsSet.add(f));
+    res.json([...floorsSet].sort());
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch floors', error: error.message });
+  }
+};
+
+
+
 
 /* ===============================
    GET ALL HALLS

@@ -10,7 +10,8 @@ import {
     getAllExamDates,
     bulkCreateHalls,
     divideHall,
-    mergeHalls
+    mergeHalls,
+    getFloors
 } from "../controllers/hallController.js";
 
 const router = express.Router();
@@ -21,6 +22,7 @@ router.post("/bulk-create", bulkCreateHalls);
 router.post("/divide", divideHall);
 router.post("/merge", mergeHalls);
 router.get("/all-exam-dates", getAllExamDates);
+router.get("/floors", getFloors);
 router.get("/", getAllHalls);
 router.get("/:id", getHallById);
 router.delete("/:id", deleteHall);

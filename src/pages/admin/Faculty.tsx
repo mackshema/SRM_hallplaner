@@ -23,14 +23,30 @@ import {
 } from "@/components/ui/table";
 import { db, Hall, User, ExamSession } from "@/lib/db";
 import { toast } from "@/components/ui/use-toast";
-import { FileDown, Pencil, Eye } from "lucide-react";
+import { FileDown, Pencil, Eye, ChevronsUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Search } from "lucide-react";
 
+// ─── Designation hierarchy config ────────────────────────────────────────────
+// Edit this ONE place to adjust rank order. Lower index = higher rank.
+const DESIGNATION_RANK: Record<string, number> = {
+  "Exam In-charge":     0,
+  "Exam Coordinator":   1,
+  "HOD":                2,
+  "Professor":          3,
+  "Associate Professor":4,
+  "Assistant Professor":5,
+};
+const getDesignationRank = (d?: string) =>
+  d && DESIGNATION_RANK[d] !== undefined ? DESIGNATION_RANK[d] : 99;
+// ─────────────────────────────────────────────────────────────────────────────
+
 const FacultyManagement = () => {
   const [faculty, setFaculty] = useState<User[]>([]);
+  // sort state: null = default order, 'asc' = top rank first, 'desc' = bottom rank first
+  const [designationSort, setDesignationSort] = useState<null | 'asc' | 'desc'>(null);
   const [settings, setSettings] = useState({
     institutionName: "",
     institutionSubtitle: "",
@@ -286,10 +302,16 @@ const FacultyManagement = () => {
     return member.isSelectedForGeneration;
   };
 
-  const filteredFaculty = faculty.filter(f =>
-    f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (f.department && f.department.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredFaculty = faculty
+    .filter(f =>
+      f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (f.department && f.department.toLowerCase().includes(searchQuery.toLowerCase()))
+    )
+    .sort((a, b) => {
+      if (!designationSort) return 0; // keep server order when no sort selected
+      const diff = getDesignationRank(a.designation) - getDesignationRank(b.designation);
+      return designationSort === 'asc' ? diff : -diff;
+    });
 
   const allSelected = filteredFaculty.length > 0 && filteredFaculty.every(f => f.isSelectedForGeneration);
 
@@ -581,7 +603,22 @@ const FacultyManagement = () => {
                 />
               </TableHead>
               <TableHead>Name</TableHead>
-              <TableHead>Designation</TableHead>
+              <TableHead>
+                <button
+                  className="flex items-center gap-1 hover:text-foreground transition-colors select-none"
+                  onClick={() =>
+                    setDesignationSort(prev =>
+                      prev === null ? 'asc' : prev === 'asc' ? 'desc' : null
+                    )
+                  }
+                  title="Sort by designation rank"
+                >
+                  Designation
+                  {designationSort === null && <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />}
+                  {designationSort === 'asc'  && <ChevronUp   className="h-3.5 w-3.5 text-blue-600" />}
+                  {designationSort === 'desc' && <ChevronDown  className="h-3.5 w-3.5 text-blue-600" />}
+                </button>
+              </TableHead>
               <TableHead>Department</TableHead>
               <TableHead>Username</TableHead>
               <TableHead className="text-right">Actions</TableHead>

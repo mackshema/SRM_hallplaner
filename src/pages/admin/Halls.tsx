@@ -58,27 +58,35 @@ import { Search } from "lucide-react";
 
 const HallsManagement = () => {
   const [halls, setHalls] = useState<Hall[]>([]);
-  // const [faculty, setFaculty] = useState<User[]>([]); // Cleaned up
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedHall, setSelectedHall] = useState<Hall | null>(null);
-
-  // Confirmation Dialog State - Unused
-  // const [confirmOpen, setConfirmOpen] = useState(false);
-  // const [pendingFacultyId, setPendingFacultyId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
     rows: 5,
     columns: 3,
     seatsPerBench: 3,
-    facultyRequired: 1, // Default to 1
+    facultyRequired: 1,
     floor: "Ground Floor"
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [examSessions, setExamSessions] = useState<CombinedExamDate[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const navigate = useNavigate();
+
+  // Floor management state
+  const [floors, setFloors] = useState<string[]>([]);
+  const [isNewFloorDialogOpen, setIsNewFloorDialogOpen] = useState(false);
+  const [newFloorName, setNewFloorName] = useState("");
+  const [newFloorError, setNewFloorError] = useState("");
+
+  const fetchFloors = async () => {
+    try {
+      const res = await fetch(`${API_URL}/halls/floors`);
+      if (res.ok) setFloors(await res.json());
+    } catch (e) { console.error("Error fetching floors", e); }
+  };
 
   // 1. Fetch ALL combined exam dates (Internal + Anna University) on Mount
   useEffect(() => {
@@ -97,6 +105,7 @@ const HallsManagement = () => {
       }
     };
     fetchSessions();
+    fetchFloors();
   }, []);
 
   // 2. Fetch Halls whenever selectedSessionId changes
@@ -138,10 +147,27 @@ const HallsManagement = () => {
   };
 
   const handleFloorChange = (floor: string) => {
-    setFormData({
-      ...formData,
-      floor
-    });
+    if (floor === "__add_new__") {
+      setNewFloorName("");
+      setNewFloorError("");
+      setIsNewFloorDialogOpen(true);
+      return;
+    }
+    setFormData({ ...formData, floor });
+  };
+
+  const handleAddNewFloor = () => {
+    const trimmed = newFloorName.trim();
+    if (!trimmed) { setNewFloorError("Floor name cannot be empty."); return; }
+    if (floors.some(f => f.toLowerCase() === trimmed.toLowerCase())) {
+      setNewFloorError("This floor already exists."); return;
+    }
+    const updated = [...floors, trimmed].sort();
+    setFloors(updated);
+    setFormData({ ...formData, floor: trimmed });
+    setIsNewFloorDialogOpen(false);
+    setNewFloorName("");
+    setNewFloorError("");
   };
 
   const resetForm = () => {
@@ -151,7 +177,7 @@ const HallsManagement = () => {
       columns: 3,
       seatsPerBench: 3,
       facultyRequired: 1,
-      floor: "Ground Floor",
+      floor: floors[0] || "Ground Floor",
     });
     setSelectedHall(null);
   };
@@ -721,12 +747,35 @@ const HallsManagement = () => {
                         <SelectValue placeholder="Select floor" />
                       </SelectTrigger>
                       <SelectContent className="bg-background z-50">
-                        <SelectItem value="Ground Floor">Ground Floor</SelectItem>
-                        <SelectItem value="First Floor">First Floor</SelectItem>
-                        <SelectItem value="Second Floor">Second Floor</SelectItem>
-                        <SelectItem value="Third Floor">Third Floor</SelectItem>
+                        {floors.length === 0 && (
+                          <SelectItem value="__placeholder__" disabled>No floors yet</SelectItem>
+                        )}
+                        {floors.map(f => (
+                          <SelectItem key={f} value={f}>{f}</SelectItem>
+                        ))}
+                        <SelectItem value="__add_new__" className="text-blue-600 font-semibold border-t mt-1 pt-1">
+                          + Add new floor
+                        </SelectItem>
                       </SelectContent>
                     </Select>
+                    {/* New Floor inline dialog */}
+                    {isNewFloorDialogOpen && (
+                      <div className="mt-2 p-3 border rounded-md bg-slate-50 space-y-2">
+                        <p className="text-sm font-medium">New Floor Name</p>
+                        <Input
+                          autoFocus
+                          placeholder="e.g., Fourth Floor"
+                          value={newFloorName}
+                          onChange={e => { setNewFloorName(e.target.value); setNewFloorError(""); }}
+                          onKeyDown={e => { if (e.key === 'Enter') handleAddNewFloor(); if (e.key === 'Escape') setIsNewFloorDialogOpen(false); }}
+                        />
+                        {newFloorError && <p className="text-xs text-red-500">{newFloorError}</p>}
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={handleAddNewFloor}>Confirm</Button>
+                          <Button size="sm" variant="outline" onClick={() => setIsNewFloorDialogOpen(false)}>Cancel</Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <DialogFooter>
