@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +22,8 @@ const SeatingPlanDetails = () => {
   const [faculty, setFaculty] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const sessionId = searchParams.get("examSessionId");
+
   useEffect(() => {
     const fetchHallDetails = async () => {
       if (!id) {
@@ -30,8 +33,7 @@ const SeatingPlanDetails = () => {
 
       try {
         // ✅ CHANGED: Fetch directly from Backend API (Single Source of Truth)
-        const sessionId = searchParams.get("examSessionId");
-        let url = `http://localhost:5000/api/halls/${id}`;
+        let url = `${API_URL}/halls/${id}`;
         if (sessionId) {
           url += `?examSessionId=${sessionId}`;
         }
@@ -61,7 +63,7 @@ const SeatingPlanDetails = () => {
     };
 
     fetchHallDetails();
-  }, [id]);
+  }, [id, sessionId]);
 
   /* ---------------- SAFE GUARDS ---------------- */
 

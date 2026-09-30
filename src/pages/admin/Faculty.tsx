@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -71,14 +72,14 @@ const FacultyManagement = () => {
         const facultyData = await db.getAllFaculty();
         setFaculty(facultyData);
 
-        const settingsRes = await fetch("http://localhost:5000/api/settings");
+        const settingsRes = await fetch(`${API_URL}/settings`);
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
         }
 
         // Fetch All Finalized Duties across all sessions
-        const dutiesRes = await fetch("http://localhost:5000/api/seating/duties/all"); // Fetch all duties
+        const dutiesRes = await fetch(`${API_URL}/seating/duties/all`); // Fetch all duties
         if (dutiesRes.ok) {
            const dutiesData = await dutiesRes.json();
            setAllFinalizedDuties(dutiesData);

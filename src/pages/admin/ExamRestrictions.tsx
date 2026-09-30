@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { db, ExamSession } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -24,7 +25,6 @@ const ExamRestrictions = () => {
             const sessData = await db.getExamSessions();
             setSessions(sessData);
             // Fetch unique departments from students
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
             const res = await fetch(`${API_URL}/users?role=student`);
             if (res.ok) {
                 const students = await res.json();

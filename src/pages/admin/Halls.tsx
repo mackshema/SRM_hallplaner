@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,7 +84,7 @@ const HallsManagement = () => {
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/halls/all-exam-dates');
+        const res = await fetch(`${API_URL}/halls/all-exam-dates`);
         if (res.ok) {
           const data = await res.json();
           setExamSessions(data || []);
@@ -105,7 +106,7 @@ const HallsManagement = () => {
       try {
         // For internal sessions pass the session id; for Anna sessions we just load all halls
         const selectedSession = examSessions.find(s => s._id === selectedSessionId);
-        let url = "http://localhost:5000/api/halls";
+        let url = `${API_URL}/halls`;
         if (selectedSessionId && selectedSession?.type === 'internal') {
           url += `?examSessionId=${selectedSessionId}`;
         }
@@ -198,14 +199,14 @@ const HallsManagement = () => {
       let res;
       if (selectedHall) {
         // UPDATE
-        res = await fetch(`http://localhost:5000/api/halls/${selectedHall._id}`, {
+        res = await fetch(`${API_URL}/halls/${selectedHall._id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
       } else {
         // CREATE
-        res = await fetch("http://localhost:5000/api/halls", {
+        res = await fetch(`${API_URL}/halls`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -262,7 +263,7 @@ const HallsManagement = () => {
   const handleDeleteHall = async (hallId: string) => {
     try {
       // ✅ CHANGED: Delete via API
-      const res = await fetch(`http://localhost:5000/api/halls/${hallId}`, {
+      const res = await fetch(`${API_URL}/halls/${hallId}`, {
         method: "DELETE"
       });
 
@@ -277,10 +278,58 @@ const HallsManagement = () => {
     } catch (error) {
       console.error("Error deleting hall:", error);
       toast({
-        title: "Failed to delete hall",
-        description: "An error occurred while deleting the hall.",
-        variant: "destructive",
-        });
+        title: "Error",
+        description: "Failed to delete hall.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDivideHall = async (hall: Hall) => {
+    if (!confirm(`Divide Drawing Hall ${hall.name} into ${hall.name}A and ${hall.name}B?`)) return;
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/halls/divide`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: hall._id })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast({ title: "Hall Divided", description: data.message });
+        const refreshRes = await fetch(`${API_URL}/halls`);
+        if (refreshRes.ok) setHalls(await refreshRes.json());
+      } else {
+        toast({ title: "Error", description: data.message || "Failed to divide hall.", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to divide hall.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMergeHalls = async (baseName: string) => {
+    if (!confirm(`Reconnect Drawing Halls ${baseName}A and ${baseName}B back into ${baseName}?`)) return;
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/halls/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseName })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast({ title: "Halls Reconnected", description: data.message });
+        const refreshRes = await fetch(`${API_URL}/halls`);
+        if (refreshRes.ok) setHalls(await refreshRes.json());
+      } else {
+        toast({ title: "Error", description: data.message || "Failed to reconnect halls.", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to reconnect halls.", variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -315,7 +364,7 @@ const HallsManagement = () => {
         }
 
         setLoading(true);
-        const res = await fetch("http://localhost:5000/api/halls/bulk-create", {
+        const res = await fetch(`${API_URL}/halls/bulk-create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ halls: formattedHalls }),
@@ -326,7 +375,7 @@ const HallsManagement = () => {
         const result = await res.json();
         
         // Refresh halls list
-        const hallsRes = await fetch("http://localhost:5000/api/halls");
+        const hallsRes = await fetch(`${API_URL}/halls`);
         if (hallsRes.ok) {
           const hallsData = await hallsRes.json();
           setHalls(hallsData || []);
@@ -413,7 +462,7 @@ const HallsManagement = () => {
     setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
 
     try {
-      const res = await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
+      const res = await fetch(`${API_URL}/exam-sessions/${session._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activeHalls: newActive })
@@ -470,7 +519,7 @@ const HallsManagement = () => {
     setExamSessions(prev => prev.map(s => s._id === session._id ? updatedSession : s));
 
     try {
-      const res = await fetch(`http://localhost:5000/api/exam-sessions/${session._id}`, {
+      const res = await fetch(`${API_URL}/exam-sessions/${session._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activeHalls: newActive })
@@ -763,62 +812,41 @@ const HallsManagement = () => {
                       >
                         Configure
                       </Button>
-                      {hall.name.toUpperCase().includes("DH") && !hall.name.toUpperCase().match(/DH[AB]$/) && hall.rows > 1 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                          onClick={async () => {
-                            if (!confirm(`Divide Drawing Hall ${hall.name} into A and B? Current configuration will be split.`)) return;
-                            
-                            const halfRows = Math.floor(hall.rows / 2);
-                            const remRows = hall.rows - halfRows;
+                      {(() => {
+                        const upperName = hall.name.toUpperCase();
+                        const isDH = upperName.includes("DH");
+                        const isDivided = isDH && Boolean(upperName.match(/DH.*[AB]$/));
+                        const baseName = hall.name.replace(/[AB]$/i, "");
+                        const hasPartner = isDivided && 
+                          halls.some(h => h.name.toUpperCase() === `${baseName}A`.toUpperCase()) && 
+                          halls.some(h => h.name.toUpperCase() === `${baseName}B`.toUpperCase());
 
-                            const hallsToCreate = [
-                              {
-                                name: `${hall.name}A`,
-                                rows: halfRows || 1,
-                                columns: hall.columns,
-                                seatsPerBench: 1,
-                                floor: hall.floor,
-                                facultyRequired: 1
-                              },
-                              {
-                                name: `${hall.name}B`,
-                                rows: remRows,
-                                columns: hall.columns,
-                                seatsPerBench: 1,
-                                floor: hall.floor,
-                                facultyRequired: 1
-                              }
-                            ];
+                        return (
+                          <>
+                            {isDH && !isDivided && hall.rows > 1 && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-blue-600 border-blue-200 hover:bg-blue-50 font-medium"
+                                onClick={() => handleDivideHall(hall)}
+                              >
+                                Divide (A/B)
+                              </Button>
+                            )}
 
-                            try {
-                              setLoading(true);
-                              // Create AB
-                              await fetch("http://localhost:5000/api/halls/bulk-create", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ halls: hallsToCreate }),
-                              });
-                              // Delete original
-                              await fetch(`http://localhost:5000/api/halls/${hall._id}`, { method: "DELETE" });
-                              
-                              // Refresh
-                              const res = await fetch("http://localhost:5000/api/halls");
-                              if (res.ok) setHalls(await res.json());
-                              
-                              toast({ title: "Hall Divided", description: `${hall.name} split into A and B.` });
-                            } catch (err) {
-                              toast({ title: "Error", description: "Failed to divide hall.", variant: "destructive" });
-                            } finally {
-                              setLoading(false);
-                            }
-                          }}
-                        >
-                          Divide
-                        </Button>
-                      )}
+                            {isDivided && hasPartner && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 font-medium"
+                                onClick={() => handleMergeHalls(baseName)}
+                              >
+                                Reconnect ({baseName})
+                              </Button>
+                            )}
+                          </>
+                        );
+                      })()}
                       <Button
                         variant="secondary"
                         size="sm"

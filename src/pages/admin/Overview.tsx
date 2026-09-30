@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { db, Hall, ExamSession } from "@/lib/db";
 import { useExam } from "@/context/ExamContext";
@@ -7,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { downloadFromApi } from "@/lib/download";
 import { FileDown, Loader2 } from "lucide-react";
 
 const AdminOverview = () => {
@@ -26,7 +28,7 @@ const AdminOverview = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/halls");
+        const res = await fetch(`${API_URL}/halls`);
         const hallsData = await res.json();
         setHalls(hallsData);
 
@@ -39,7 +41,7 @@ const AdminOverview = () => {
           setSelectedFinalSession(finals[finals.length - 1]._id);
         }
 
-        const annaRes = await fetch("http://localhost:5000/api/anna/seating-plans");
+        const annaRes = await fetch(`${API_URL}/anna/seating-plans`);
         if (annaRes.ok) {
            const annaSessions = await annaRes.json();
            const annaFinals = annaSessions.filter((s:any) => s.status === "FINAL");
@@ -75,7 +77,7 @@ const AdminOverview = () => {
       }
 
       // 2. Fetch from backend ZIP route
-      const response = await fetch(`http://localhost:5000/api/export/full-exam/${session._id}`);
+      const response = await fetch(`${API_URL}/export/full-exam/${session._id}`);
 
       if (!response.ok) {
         const err = await response.json();
@@ -111,10 +113,8 @@ const AdminOverview = () => {
         const edStr = ed.replace(/\//g, "-");
         
         const endpoint = type === 'consolidated' ? 'export-consolidated' : 'export-layouts';
-        window.open(`http://localhost:5000/api/anna/${endpoint}/${edStr}/${ses}`, "_blank");
-        
-        // Wait a slight bit before showing success to ensure popup blocker didn't instantly kill it
-        setTimeout(() => toast({ title: "Success", description: "Anna University package downloaded successfully." }), 500);
+        await downloadFromApi(`${API_URL}/anna/${endpoint}/${edStr}/${ses}`, `Anna_${edStr}_${ses}.${type === 'consolidated' ? 'pdf' : 'docx'}`);
+        toast({ title: "Success", description: "Anna University package downloaded successfully." });
       } catch (error: any) {
         toast({ title: "Download Error", description: error.message || "An unexpected error occurred", variant: "destructive" });
       } finally {

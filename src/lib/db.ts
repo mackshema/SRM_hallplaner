@@ -1,3 +1,5 @@
+import { API_URL } from "@/lib/api";
+
 
 // Simulating database operations with Backend API
 // No localStorage logic allowed for persistence
@@ -79,7 +81,7 @@ export interface ExamSession {
 }
 
 class DatabaseService {
-  private apiUrl = "http://localhost:5000/api";
+  private apiUrl = API_URL;
 
   constructor() { }
 
@@ -205,7 +207,7 @@ class DatabaseService {
     }
   }
 
-  async addFaculty(faculty: Omit<User, 'id' | '_id'>): Promise<User> {
+  async addFaculty(faculty: Omit<User, 'id' | '_id' | 'role'> & { role?: User['role'] }): Promise<User> {
     const res = await fetch(`${this.apiUrl}/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

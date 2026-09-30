@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
+import { API_BASE } from './lib/api'
 
 // Global fetch interceptor to append JWT token to backend API requests
 const originalFetch = window.fetch;
@@ -9,7 +10,7 @@ window.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : (input instanceof URL ? input.toString() : input.url);
 
   // Apply authorization header to local API requests
-  if (token && (url.includes('localhost:5000') || url.includes('/api/') || !url.startsWith('http'))) {
+  if (token && (url.startsWith(API_BASE) || url.includes('/api/') || !url.startsWith('http'))) {
     init = init || {};
     const headers = init.headers || {};
     
@@ -30,20 +31,16 @@ window.fetch = async (input, init) => {
     }
   }
 
-  try {
-    const response = await originalFetch(input, init);
-    // If unauthorized (401), clear session and redirect to login
-    if (response.status === 401 && !url.includes('/api/auth/login')) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('currentUser');
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login';
-      }
+  const response = await originalFetch(input, init);
+  // If unauthorized (401), clear session and redirect to login
+  if (response.status === 401 && !url.includes('/api/auth/login')) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('currentUser');
+    if (!window.location.pathname.includes('/login')) {
+      window.location.href = '/login';
     }
-    return response;
-  } catch (error) {
-    throw error;
   }
+  return response;
 };
 
 createRoot(document.getElementById("root")!).render(<App />);

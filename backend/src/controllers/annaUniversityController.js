@@ -4,6 +4,8 @@ import AnnaSeating from '../models/AnnaSeating.js';
 import Hall from '../models/Hall.js';
 import User from '../models/User.js';
 import FacultyDuty from '../models/FacultyDuty.js';
+import { deleteSessionDuties, compareSessions, previousSession, dutiesFromAssignments } from '../utils/facultyDuties.js';
+import { timetableEntryFromRow, validateTimetable, timetableErrorResponse, applyTimetable, parseRawTimetableLines, escapeRegex } from '../utils/timetableImport.js';
 import { exec } from 'child_process';
 import path from 'path';
 import { mkdirSync, existsSync, readdirSync, statSync, rmSync } from 'fs';
@@ -44,7 +46,11 @@ const getDateDaysAgo = (dateStr, days) => {
   return d.toISOString().split('T')[0]; // YYYY-MM-DD
 };
 
-const runFacultyAllocation = async (examDate, session, hallsWithStudents, demandFacultyIdsInput = []) => {
+/**
+ * @param extraDuties duties not yet saved as FacultyDuty (sessions generated
+ *   earlier in the same run, or draft plans) - counted by every duty rule.
+ */
+const runFacultyAllocation = async (examDate, session, hallsWithStudents, demandFacultyIdsInput = [], extraDuties = []) => {
   const demandFacultyIds = (demandFacultyIdsInput || []).map(id => id.toString());
 
   // 1. Fetch all eligible faculty
@@ -52,24 +58,21 @@ const runFacultyAllocation = async (examDate, session, hallsWithStudents, demand
 
   // 2. Fetch recent duties for constraint checking (last 7 days)
   const sevenDaysAgo = getDateDaysAgo(examDate, 7);
-  const recentDuties = await FacultyDuty.find({
+  const savedDuties = await FacultyDuty.find({
     examDate: { $gte: sevenDaysAgo, $lte: examDate }
   }).select('facultyId examDate examSession').lean();
+  const recentDuties = [
+    ...savedDuties,
+    ...extraDuties.filter(d => d.examDate >= sevenDaysAgo && d.examDate <= examDate),
+  ];
 
-  // Determine previous session
-  let previousSession = null;
-  if (session === "AN") {
-    previousSession = { examDate, session: "FN" };
-  } else {
-    // Find the closest previous date in AnnaSeating
-    const prevSeatingDoc = await AnnaSeating.findOne({ examDate: { $lt: examDate } }).sort({ examDate: -1, session: -1 });
-    if (prevSeatingDoc) {
-      previousSession = { examDate: prevSeatingDoc.examDate, session: prevSeatingDoc.session };
-    }
-  }
+  // Previous session = the latest Anna session (or duty) before this one.
+  // Same-day FN for an AN session; otherwise the previous day's last session.
+  const earlierPlans = await AnnaSeating.find({ examDate: { $lte: examDate } }).select('examDate session').lean();
+  const prevSlot = previousSession(examDate, session, [...earlierPlans, ...recentDuties]);
 
   // Build lookup Set for previous session duties
-  const prevSessionKey = previousSession ? `${previousSession.examDate}_${previousSession.session}` : null;
+  const prevSessionKey = prevSlot ? `${prevSlot.examDate}_${prevSlot.examSession}` : null;
   const prevSessionFacultySet = new Set(
     prevSessionKey
       ? recentDuties
@@ -235,11 +238,12 @@ export const uploadStudents = async (req, res) => {
 
     // Upsert or insert many
     for (const d of formattedData) {
-      // Find if we already have a timetable date for this subject code
-      const existingTimetable = await AnnaExamData.findOne({ 
-        subjectCode: { $regex: new RegExp(`^${d.subjectCode}$`, 'i') }, 
-        examDate: { $ne: "" } 
-      });
+      // Find if we already have a timetable date for this subject code,
+      // preferring the student's own department when the code is shared
+      const codeFilter = { $regex: new RegExp(`^${escapeRegex(d.subjectCode)}$`, 'i') };
+      const existingTimetable =
+        await AnnaExamData.findOne({ subjectCode: codeFilter, department: d.department, examDate: { $ne: "" } }) ||
+        await AnnaExamData.findOne({ subjectCode: codeFilter, examDate: { $ne: "" } });
       
       if (existingTimetable) {
         d.examDate = existingTimetable.examDate;
@@ -265,37 +269,17 @@ export const uploadTimetableRaw = async (req, res) => {
     const { textData } = req.body;
     if (!textData) return res.status(400).json({ error: "Missing text data" });
 
-    // Very basic heuristic for OCR: Look for lines with alphanumeric subject codes
-    const lines = textData.split('\n');
-    let matchedSubjects = 0;
+    // Very basic heuristic for OCR: "CS101 2024-05-15 FN ComputerScience"
+    const updates = parseRawTimetableLines(textData);
 
     // NEW: Clear existing dates before applying new timetable
     await AnnaExamData.updateMany({}, { $set: { examDate: "", session: "" } });
 
-    for (const line of lines) {
-      const parts = line.split(/\s+/).filter(Boolean);
-      // We assume an OCR line might look like: "CS101 2024-05-15 FN ComputerScience"
-      if (parts.length >= 3) {
-        let subjectCode = parts[0];
-        let examDate = parts[1];
-        let session = parts[2];
-        let department = parts.slice(3).join(' ') || "Unknown"; // optional department
-
-        // Only save if session is exactly FN or AN
-        if (session === "FN" || session === "AN" || session.includes("FN") || session.includes("AN")) {
-           session = session.includes("FN") ? "FN" : "AN";
-           await AnnaExamData.updateMany(
-             { subjectCode },
-             { $set: { examDate, session, department } },
-             { upsert: true } // Need to create so we know which department has which subject code!
-           );
-           matchedSubjects++;
-        }
-      }
-    }
+    const matchedSubjects = await applyTimetable(AnnaExamData, updates);
     // NEW: Clear old plans as requested by user
+    const oldPlans = await AnnaSeating.find({}, 'examDate session').lean();
+    await deleteSessionDuties(oldPlans.map(p => ({ examDate: p.examDate, examSession: p.session })));
     await AnnaSeating.deleteMany({});
-    await FacultyDuty.deleteMany({});
 
     // Automatically trigger fresh generation
     const generationResult = await runAnnaGeneration();
@@ -313,6 +297,29 @@ export const uploadTimetableRaw = async (req, res) => {
 
 export const uploadTimetable = async (req, res) => {
   try {
+    let entries;
+    if (!req.file) {
+      if (!req.body.timetable) {
+         return res.status(400).json({ error: 'No file or manual timetable provided' });
+      }
+      entries = req.body.timetable;
+    } else {
+      const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+      entries = data.map(timetableEntryFromRow);
+    }
+
+    // Validate before the confirmation gate so a bad file is rejected without
+    // the admin ever being asked to confirm a deletion.
+    const { updates, errors } = validateTimetable(entries, req.file ? 2 : 1);
+    if (errors.length > 0) {
+      return res.status(400).json(timetableErrorResponse(errors));
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'Invalid timetable data provided' });
+    }
+
     // SAFETY GATE — prevent accidental data destruction
     if (req.query.confirmed !== 'true') {
       const annaCount = await AnnaSeating.countDocuments();
@@ -334,73 +341,16 @@ export const uploadTimetable = async (req, res) => {
     // Run auto-backup before destructive operations
     await autoBackup();
 
-    let updates = [];
-    if (!req.file) {
-      if (!req.body.timetable) {
-         return res.status(400).json({ error: 'No file or manual timetable provided' });
-      }
-      updates = req.body.timetable;
-    } else {
-      const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-      updates = data.map(row => {
-        const sub = row['Subject Code'] || row['subjectCode'];
-        let dat = row['Date'] || row['date'] || row['examDate'];
-        const ses = row['Session'] || row['session'];
-        const dept = row['Department'] || row['department'];
-        const year = row['Year'] || row['year'] || row['Degree'] || row['degree'];
-        
-        if (!sub || !dat || !ses) return null;
-
-        // Excel parses dates as serial numbers (e.g., 46152 for May 10, 2026)
-        if (typeof dat === 'number') {
-            const parsedDate = new Date(Math.round((dat - 25569) * 86400 * 1000));
-            dat = parsedDate.toISOString().split('T')[0]; // "YYYY-MM-DD"
-        }
-        return {
-          subjectCode: String(sub).trim(),
-          examDate: String(dat).trim(),
-          session: String(ses).trim(),
-          department: dept ? String(dept).trim() : null,
-          year: year ? String(year).trim() : ""
-        };
-      }).filter(Boolean);
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'Invalid timetable data provided' });
-    }
-
     // NEW: Clear existing dates before applying new timetable
     await AnnaExamData.updateMany({}, { $set: { examDate: "", session: "" } });
 
-    // Update ExamData with these dates (upsert so we store the active map for the session)
-    // Update ExamData with these dates
-    let matchedCount = 0;
-    for (const u of updates) {
-      // Use case-insensitive regex for subject code matching
-      const result = await AnnaExamData.updateMany(
-        { subjectCode: { $regex: new RegExp(`^${u.subjectCode}$`, 'i') } },
-        { $set: { examDate: u.examDate, session: u.session, department: u.department || "Unknown", year: u.year || "" } }
-      );
-      
-      // If NO existing student records were found, we still need to create the generic mapping entry
-      // This ensures the row shows up in the "Timetable Feed" table in the UI
-      if (result.matchedCount === 0) {
-        await AnnaExamData.updateOne(
-          { subjectCode: u.subjectCode, rollNumber: { $exists: false } },
-          { $set: { examDate: u.examDate, session: u.session, department: u.department || "Unknown", year: u.year || "" } },
-          { upsert: true }
-        );
-      }
-      matchedCount++;
-    }
+    // Subject codes are matched case-insensitively for Anna data
+    const matchedCount = await applyTimetable(AnnaExamData, updates, { caseInsensitive: true });
 
     // NEW: Clear old plans as requested by user
+    const oldPlans = await AnnaSeating.find({}, 'examDate session').lean();
+    await deleteSessionDuties(oldPlans.map(p => ({ examDate: p.examDate, examSession: p.session })));
     await AnnaSeating.deleteMany({});
-    await FacultyDuty.deleteMany({});
 
     // Automatically trigger fresh generation
     const generationResult = await runAnnaGeneration();
@@ -487,7 +437,7 @@ export const manualMapSubject = async (req, res) => {
 
 export const generateAnnaSeating = async (req, res) => {
   try {
-    const { examDate, session, maxPerHall = 25, seatsPerBench: spb = 2 } = req.body;
+    const { examDate, session, maxPerHall = 25, seatsPerBench: maxSpb = 2 } = req.body;
 
     if (!examDate || !session) {
       return res.status(400).json({ error: "examDate and session required" });
@@ -570,10 +520,12 @@ export const generateAnnaSeating = async (req, res) => {
 
       const assignmentInHall = [];
       let capacityUsed = 0;
-      
+
+      // Never exceed the hall's own bench size (drawing halls have 1 seat per bench)
+      const spb = Math.min(maxSpb, hall.seatsPerBench || maxSpb);
       const hallMax = Math.min(
         maxPerHall,
-        hall.rows * hall.columns * (req.body.seatsPerBench || spb)
+        hall.rows * hall.columns * spb
       );
 
       // We maintain a 2D grid to check adjacencies.
@@ -702,7 +654,10 @@ export const generateAnnaSeating = async (req, res) => {
     // Allocate faculty
     const hallsWithStudents = [...new Set(allAssignments.map(a => a.hallId.toString()))];
     const demandFacultyIds = req.body.demandFacultyIds || [];
-    const facultyAllocationResult = await runFacultyAllocation(examDate, session, hallsWithStudents, demandFacultyIds);
+    // Other draft plans' invigilators count towards the duty rules too
+    const draftPlans = await AnnaSeating.find({ status: { $ne: 'FINAL' } }).select('examDate session facultyAssignments').lean();
+    const draftDuties = draftPlans.flatMap(p => dutiesFromAssignments(p.examDate, p.session, p.facultyAssignments));
+    const facultyAllocationResult = await runFacultyAllocation(examDate, session, hallsWithStudents, demandFacultyIds, draftDuties);
 
     // Save Seating
     const newSeating = new AnnaSeating({
@@ -774,14 +729,22 @@ export const updateStatus = async (req, res) => {
     if (status !== undefined) updatePayload.status = status;
     if (isPublished !== undefined) updatePayload.isPublished = isPublished;
     
+    const before = await AnnaSeating.findOne({ examDate, session }).select('status').lean();
+    const wasFinal = before?.status === "FINAL";
+
     const plan = await AnnaSeating.findOneAndUpdate(
       { examDate, session },
       { $set: updatePayload },
       { new: true }
     );
-    
-    // If finalizing, create FacultyDuties for dashboard
-    if (status === "FINAL" && plan) {
+
+    // Leaving FINAL: remove this plan's duties so it can be finalized again cleanly
+    if (plan && wasFinal && status !== undefined && status !== "FINAL") {
+      await FacultyDuty.deleteMany({ examDate, examSession: session });
+    }
+
+    // Becoming FINAL: create FacultyDuties for dashboard (only once, on the transition)
+    if (status === "FINAL" && plan && !wasFinal) {
        const newDuties = [];
        const faMap = new Map(
          (plan.facultyAssignments || []).map(fa => [fa.hallId.toString(), fa.facultyIds])
@@ -838,7 +801,7 @@ export const deleteSeatingPlan = async (req, res) => {
 /**
  * Internal helper to run the full generation logic for Anna University Exams.
  */
-async function runAnnaGeneration(maxPerHall = 25, spb = 2, demandFacultyIds = []) {
+async function runAnnaGeneration(maxPerHall = 25, maxSpb = 2, demandFacultyIds = []) {
   const scheduledSubjects = await AnnaExamData.find({ 
     examDate: { $exists: true, $ne: "" }, 
     session: { $exists: true, $ne: "" } 
@@ -852,6 +815,8 @@ async function runAnnaGeneration(maxPerHall = 25, spb = 2, demandFacultyIds = []
           uniqueSessions.push({ examDate: s.examDate, session: s.session });
      }
   });
+  // Chronological order, so each session's duty rules can see the sessions before it
+  uniqueSessions.sort(compareSessions);
 
   const allStudents = await User.find({ role: 'student' }).lean();
   if(allStudents.length === 0) return { count: 0, message: "No students exist" };
@@ -864,12 +829,18 @@ async function runAnnaGeneration(maxPerHall = 25, spb = 2, demandFacultyIds = []
   let globalAllocationWarnings = [];
   let hasShortage = false;
   const allAssignedFacultyIds = new Set();
+  // Duties handed out in this run (and in existing draft plans). They aren't
+  // saved as FacultyDuty until finalize, but the duty rules must still count them.
+  const runDuties = [];
 
   for (const { examDate, session } of uniqueSessions) {
      const existing = await AnnaSeating.findOne({ examDate, session });
      if (existing) {
+        if (existing.status !== 'FINAL') {
+          runDuties.push(...dutiesFromAssignments(examDate, session, existing.facultyAssignments));
+        }
         skippedCount++;
-        continue; 
+        continue;
      }
 
      const activeSubjects = scheduledSubjects.filter(sub => sub.examDate === examDate && sub.session === session);
@@ -915,6 +886,8 @@ async function runAnnaGeneration(maxPerHall = 25, spb = 2, demandFacultyIds = []
        if (studentQueue.length === 0) break;
        const assignmentInHall = [];
        let capacityUsed = 0;
+       // Never exceed the hall's own bench size (drawing halls have 1 seat per bench)
+       const spb = Math.min(maxSpb, hall.seatsPerBench || maxSpb);
        const hallMax = Math.min(maxPerHall, hall.rows * hall.columns * spb);
        const grid = Array(hall.rows).fill(null).map(() => Array(hall.columns * spb).fill(null));
 
@@ -980,8 +953,13 @@ async function runAnnaGeneration(maxPerHall = 25, spb = 2, demandFacultyIds = []
        if (assignmentInHall.length > 0) allAssignments.push(...assignmentInHall);
      }
 
+     if (studentQueue.length > 0) {
+       hasShortage = true;
+       globalAllocationWarnings.push(`${examDate} ${session}: ${studentQueue.length} student(s) could not be seated - not enough seats that satisfy the seating rules (add halls or mix more departments)`);
+     }
+
      const hallsWithStudentsInSession = [...new Set(allAssignments.map(a => a.hallId.toString()))];
-     const facultyAllocationResult = await runFacultyAllocation(examDate, session, hallsWithStudentsInSession, demandFacultyIds);
+     const facultyAllocationResult = await runFacultyAllocation(examDate, session, hallsWithStudentsInSession, demandFacultyIds, runDuties);
 
      const newSeating = new AnnaSeating({
        examDate, session,
@@ -989,6 +967,7 @@ async function runAnnaGeneration(maxPerHall = 25, spb = 2, demandFacultyIds = []
        facultyAssignments: facultyAllocationResult.facultyAssignments
      });
      await newSeating.save();
+     runDuties.push(...dutiesFromAssignments(examDate, session, facultyAllocationResult.facultyAssignments));
      generatedCount++;
 
      if (facultyAllocationResult.shortage) {

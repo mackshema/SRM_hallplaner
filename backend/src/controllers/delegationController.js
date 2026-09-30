@@ -4,6 +4,7 @@ import FacultyDuty from "../models/FacultyDuty.js";
 import Hall from "../models/Hall.js";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import jwt from "jsonwebtoken";
 
 dotenv.config();
 
@@ -19,6 +20,25 @@ const transporter = nodemailer.createTransport({
 
 const getBaseUrl = (req) => {
     return `${req.protocol}://${req.get('host')}`;
+};
+
+// Email buttons are clicked outside the app, so they can't send a login token.
+// Each link carries its own signed token that only allows this action on this
+// request (checked by allowEmailLink in delegationRoutes.js).
+const actionLink = (req, id, action) => {
+    const t = jwt.sign({ rid: String(id), action }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    return `${getBaseUrl(req)}/api/delegation/${id}/${action}?t=${t}`;
+};
+
+// A failed email must not undo or hide an action that has already been saved.
+const trySendMail = async (mailOptions) => {
+    try {
+        await transporter.sendMail(mailOptions);
+        return true;
+    } catch (error) {
+        console.error("Delegation email failed:", error.message);
+        return false;
+    }
 };
 
 export const createDelegationRequest = async (req, res) => {
@@ -52,9 +72,10 @@ export const createDelegationRequest = async (req, res) => {
         // Step 2: Delegation approval email is sent ONLY to the requesting faculty's department HOD.
         // Falls back to manually entered hodEmail if HOD user isn't found in DB.
         const hodEmail = departmentHOD ? (departmentHOD.facultyEmail || departmentHOD.username) : requestingFaculty.hodEmail;
+        let emailSent = false;
         if (hodEmail) {
-            const approveUrl = `${getBaseUrl(req)}/api/delegation/${newRequest._id}/hod-approve`;
-            const declineUrl = `${getBaseUrl(req)}/api/delegation/${newRequest._id}/hod-reject`;
+            const approveUrl = actionLink(req, newRequest._id, 'hod-approve');
+            const declineUrl = actionLink(req, newRequest._id, 'hod-reject');
 
             const mailOptions = {
                 from: `"Exam Cell" <${process.env.EMAIL_USER}>`,
@@ -74,10 +95,10 @@ export const createDelegationRequest = async (req, res) => {
                 `
             };
 
-            await transporter.sendMail(mailOptions);
+            emailSent = await trySendMail(mailOptions);
         }
 
-        res.status(201).json(newRequest);
+        res.status(201).json({ ...newRequest.toObject(), emailSent });
     } catch (error) {
         console.error("Delegation creation error:", error);
         res.status(500).json({ message: "Failed to create delegation request" });
@@ -87,17 +108,22 @@ export const createDelegationRequest = async (req, res) => {
 export const hodApprove = async (req, res) => {
     try {
         const { id } = req.params;
-        const request = await DelegationRequest.findByIdAndUpdate(id, {
-            hodApprovalStatus: 'Approved',
-            status: 'Pending Faculty Response'
-        }, { new: true }).populate('requestingFacultyId replacementFacultyId');
+        const request = await DelegationRequest.findOneAndUpdate(
+            { _id: id, status: 'Pending HOD Approval' },
+            { hodApprovalStatus: 'Approved', status: 'Pending Faculty Response' },
+            { new: true }
+        ).populate('requestingFacultyId replacementFacultyId');
 
-        if (!request) return res.status(404).send("Request not found");
+        if (!request) {
+            const existing = await DelegationRequest.findById(id);
+            if (!existing) return res.status(404).send("Request not found");
+            return res.status(400).send(`<h1>This request has already been handled (${existing.status}).</h1>`);
+        }
 
         const replacementEmail = request.replacementFacultyId.facultyEmail;
         if (replacementEmail) {
-            const acceptUrl = `${getBaseUrl(req)}/api/delegation/${request._id}/faculty-accept`;
-            const declineUrl = `${getBaseUrl(req)}/api/delegation/${request._id}/faculty-decline`;
+            const acceptUrl = actionLink(req, request._id, 'faculty-accept');
+            const declineUrl = actionLink(req, request._id, 'faculty-decline');
 
             const mailOptions = {
                 from: `"Exam Cell" <${process.env.EMAIL_USER}>`,
@@ -116,10 +142,13 @@ export const hodApprove = async (req, res) => {
                 `
             };
 
-            await transporter.sendMail(mailOptions);
+            const sent = await trySendMail(mailOptions);
+            return res.send(sent
+                ? "<h1>Request Approved successfully. Email sent to replacement faculty.</h1>"
+                : "<h1>Request Approved. The email to the replacement faculty could not be sent - please inform them directly.</h1>");
         }
 
-        res.send("<h1>Request Approved successfully. Email sent to replacement faculty.</h1>");
+        res.send("<h1>Request Approved. The replacement faculty has no email on file - please inform them directly.</h1>");
     } catch (error) {
         console.error("HOD Approve error:", error);
         res.status(500).send("Error approving request");
@@ -129,10 +158,11 @@ export const hodApprove = async (req, res) => {
 export const hodReject = async (req, res) => {
     try {
         const { id } = req.params;
-        await DelegationRequest.findByIdAndUpdate(id, {
-            hodApprovalStatus: 'Rejected',
-            status: 'Rejected by HOD'
-        });
+        const request = await DelegationRequest.findOneAndUpdate(
+            { _id: id, status: 'Pending HOD Approval' },
+            { hodApprovalStatus: 'Rejected', status: 'Rejected by HOD' }
+        );
+        if (!request) return res.status(400).send("<h1>This request has already been handled.</h1>");
         res.send("<h1>Request Rejected. The delegation has been cancelled.</h1>");
     } catch (error) {
         res.status(500).send("Error rejecting request");
@@ -186,10 +216,11 @@ export const facultyAccept = async (req, res) => {
 export const facultyDecline = async (req, res) => {
     try {
         const { id } = req.params;
-        await DelegationRequest.findByIdAndUpdate(id, {
-            facultyResponseStatus: 'Declined',
-            status: 'Declined'
-        });
+        const request = await DelegationRequest.findOneAndUpdate(
+            { _id: id, status: 'Pending Faculty Response' },
+            { facultyResponseStatus: 'Declined', status: 'Declined' }
+        );
+        if (!request) return res.status(400).send("<h1>This request is not waiting for your response.</h1>");
         res.send("<h1>You have declined the duty delegation.</h1>");
     } catch (error) {
         res.status(500).send("Error declining request");

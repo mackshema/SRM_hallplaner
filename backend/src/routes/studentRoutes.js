@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAdmin } from "../middleware/authMiddleware.js";
+import { requireAdmin, requireAuth } from "../middleware/authMiddleware.js";
 import { getStudentExamDetails, createStudentAccount, changeStudentPassword, getAllStudents, updateStudentAccount, bulkCreateStudents, deleteStudentAccount } from "../controllers/studentController.js";
 
 const router = express.Router();
@@ -7,12 +7,14 @@ const router = express.Router();
 // Public route for students to lookup their exam hall
 router.get("/:rollNumber", getStudentExamDetails);
 
+// Any logged-in user; students may only change their own password (checked in the controller)
+router.post("/change-password", requireAuth, changeStudentPassword);
+
 // Protect all following routes (Admin only)
 router.use(requireAdmin);
 
 // Student Authentication endpoints
 router.post("/create-account", createStudentAccount);
-router.post("/change-password", changeStudentPassword);
 
 // Student Management by Admin
 router.get("/", getAllStudents);

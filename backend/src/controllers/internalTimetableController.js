@@ -5,6 +5,8 @@ import ExamSession from '../models/ExamSession.js';
 import Hall from '../models/Hall.js';
 import User from '../models/User.js';
 import FacultyDuty from '../models/FacultyDuty.js';
+import { deleteSessionDuties, compareSessions, previousSession, dutiesFromAssignments } from '../utils/facultyDuties.js';
+import { timetableEntryFromRow, validateTimetable, timetableErrorResponse, applyTimetable, parseRawTimetableLines } from '../utils/timetableImport.js';
 
 export const getExamData = async (req, res) => {
   try {
@@ -20,36 +22,17 @@ export const uploadTimetableRaw = async (req, res) => {
     const { textData } = req.body;
     if (!textData) return res.status(400).json({ error: "Missing text data" });
 
-    const lines = textData.split('\n');
-    let matchedSubjects = 0;
+    const updates = parseRawTimetableLines(textData);
 
     // NEW: Clear existing dates before applying new timetable
     await InternalExamData.updateMany({}, { $set: { examDate: "", session: "" } });
 
-    for (const line of lines) {
-      const parts = line.split(/\s+/).filter(Boolean);
-      if (parts.length >= 3) {
-        let subjectCode = parts[0];
-        let examDate = parts[1];
-        let session = parts[2];
-        let department = parts.slice(3).join(' ') || "Unknown";
-
-        if (session === "FN" || session === "AN" || session.includes("FN") || session.includes("AN")) {
-           session = session.includes("FN") ? "FN" : "AN";
-           await InternalExamData.updateMany(
-             { subjectCode },
-             { $set: { examDate, session, department } },
-             { upsert: true }
-           );
-           matchedSubjects++;
-        }
-      }
-    }
+    const matchedSubjects = await applyTimetable(InternalExamData, updates);
     // NEW: Clear old plans as requested by user
+    await deleteSessionDuties(await ExamSession.find({}, 'examDate examSession').lean());
     await ExamSession.deleteMany({});
     await SeatAssignment.deleteMany({});
     await Hall.updateMany({}, { $set: { facultyAssigned: [] } });
-    await FacultyDuty.deleteMany({});
 
     // Automatically trigger fresh generation
     const generationResult = await runInternalGeneration();
@@ -77,52 +60,28 @@ export const uploadTimetable = async (req, res) => {
       const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-      updates = data.map(row => {
-        const sub = row['Subject Code'] || row['subjectCode'];
-        let dat = row['Date'] || row['date'] || row['examDate'];
-        const ses = row['Session'] || row['session'];
-        const dept = row['Department'] || row['department'];
-        const year = row['Year'] || row['year'] || row['Degree'] || row['degree'];
-        
-        if (!sub || !dat || !ses) return null;
-
-        if (typeof dat === 'number') {
-            const parsedDate = new Date(Math.round((dat - 25569) * 86400 * 1000));
-            dat = parsedDate.toISOString().split('T')[0];
-        }
-        return {
-          subjectCode: String(sub).trim(),
-          examDate: String(dat).trim(),
-          session: String(ses).trim(),
-          department: dept ? String(dept).trim() : null,
-          year: year ? String(year).trim() : ""
-        };
-      }).filter(Boolean);
+      updates = data.map(timetableEntryFromRow);
     }
 
-    if (updates.length === 0) {
+    // Validate everything before touching the database
+    const { updates: validUpdates, errors } = validateTimetable(updates, req.file ? 2 : 1);
+    if (errors.length > 0) {
+      return res.status(400).json(timetableErrorResponse(errors));
+    }
+    if (validUpdates.length === 0) {
       return res.status(400).json({ error: 'Invalid timetable data provided' });
     }
 
     // NEW: Clear existing dates before applying new timetable to ensure old plan is truly removed
     await InternalExamData.updateMany({}, { $set: { examDate: "", session: "" } });
 
-    let matchedCount = 0;
-    for (const u of updates) {
-      await InternalExamData.updateMany(
-        { subjectCode: u.subjectCode },
-        { $set: { examDate: u.examDate, session: u.session, department: u.department || "Unknown", year: u.year || "" } },
-        { upsert: true }
-      );
-      matchedCount++;
-    }
+    const matchedCount = await applyTimetable(InternalExamData, validUpdates);
 
     // NEW: Clear old plans as requested by user
+    await deleteSessionDuties(await ExamSession.find({}, 'examDate examSession').lean());
     await ExamSession.deleteMany({});
     await SeatAssignment.deleteMany({});
     await Hall.updateMany({}, { $set: { facultyAssigned: [] } });
-    await FacultyDuty.deleteMany({});
 
     // Automatically trigger fresh generation
     const generationResult = await runInternalGeneration();
@@ -225,6 +184,8 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
           uniqueSessions.push({ examDate: s.examDate, session: s.session });
      }
   });
+  // Chronological order, so each session's duty rules can see the sessions before it
+  uniqueSessions.sort(compareSessions);
 
   const allStudents = await User.find({ role: 'student' }).lean();
   const halls = await Hall.find({ isSelected: true });
@@ -234,12 +195,18 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
   let skippedCount = 0;
   let globalAllocationWarnings = [];
   const allAssignedFacultyIds = new Set();
+  // Duties handed out in this run (and in existing draft sessions). They aren't
+  // saved as FacultyDuty until finalize, but the duty rules must still count them.
+  const runDuties = [];
 
   for (const { examDate, session } of uniqueSessions) {
      let examSessionDoc = await ExamSession.findOne({ examDate, examSession: session });
      if (examSessionDoc) {
+        if (examSessionDoc.status !== 'FINAL') {
+          runDuties.push(...dutiesFromAssignments(examDate, session, examSessionDoc.facultyAssignments));
+        }
         skippedCount++;
-        continue; 
+        continue;
      }
 
      examSessionDoc = new ExamSession({
@@ -438,22 +405,35 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
            }
          }
        }
+
+       // Students pulled into this hall's batch but left unplaced (adjacency rules
+       // left seats empty) go back to the front of their queue for the next hall.
+       for (const [dId, leftover] of hallBatch) {
+         if (leftover.length > 0) deptQueues[dId].unshift(...leftover);
+       }
+     }
+
+     const unseated = Object.values(deptQueues).reduce((n, q) => n + q.length, 0);
+     if (unseated > 0) {
+       globalAllocationWarnings.push(`${examDate} ${session}: ${unseated} student(s) could not be seated - not enough seats that satisfy the seating rules (add halls or mix more departments)`);
      }
 
      if (assignments.length > 0) await SeatAssignment.insertMany(assignments);
 
      const allFacultyForSession = await User.find({ role: 'faculty' }).lean();
-     const allDuties = await FacultyDuty.find({}).lean();
+     const allDuties = [...await FacultyDuty.find({}).lean(), ...runDuties];
      const shuffledFaculty = [...allFacultyForSession];
      for (let i = shuffledFaculty.length - 1; i > 0; i--) {
        const j = Math.floor(Math.random() * (i + 1));
        [shuffledFaculty[i], shuffledFaculty[j]] = [shuffledFaculty[j], shuffledFaculty[i]];
      }
 
-     const prevSession = session === 'FN' ? null : 'FN';
+     // No continuous duty: nobody who invigilated the session just before this one
+     // (same-day FN for an AN session, otherwise the latest earlier session)
+     const prev = previousSession(examDate, session, [...uniqueSessions, ...allDuties]);
      const previouslyAssignedIds = new Set();
-     if (prevSession) {
-       allDuties.filter(d => d.examDate === examDate && d.examSession === prevSession).forEach(d => previouslyAssignedIds.add(d.facultyId.toString()));
+     if (prev) {
+       allDuties.filter(d => d.examDate === prev.examDate && d.examSession === prev.examSession).forEach(d => previouslyAssignedIds.add(d.facultyId.toString()));
      }
 
      const isFacultyAvailable = (faculty, hallAssignedIds) => {
@@ -520,6 +500,7 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
      await ExamSession.findByIdAndUpdate(examSessionDoc._id, {
        $set: { facultyAssignments: sessionFacultyAssignments }
      });
+     runDuties.push(...dutiesFromAssignments(examDate, session, sessionFacultyAssignments));
 
      if (allocationWarnings.length > 0) globalAllocationWarnings.push(...allocationWarnings);
      generatedCount++;

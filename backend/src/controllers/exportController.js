@@ -120,6 +120,86 @@ export const downloadFullExamPackage = async (req, res) => {
     }
 };
 
+// Bench layouts are downloadable before finalizing, so they can be checked hall by hall.
+const buildHallLayouts = async (examPlanId, hallId) => {
+    const session = await ExamSession.findById(examPlanId);
+    if (!session) return { error: "Exam session not found" };
+
+    const settings = await Settings.findOne() || {
+        institutionName: "SRM MADURAI",
+        institutionSubtitle: "COLLEGE FOR ENGINEERING AND TECHNOLOGY",
+        institutionAffiliation: "Approved by AICTE | Affiliated to Anna University",
+        examCellName: "EXAMINATION CELL",
+        academicYear: "ACADEMIC YEAR 2025-2026",
+        examName: "INTERNAL ASSESSMENT TEST"
+    };
+
+    const assignments = await SeatAssignment.find({ examSessionId: examPlanId });
+    const usedHallIds = [...new Set(assignments.map(a => a.hallId.toString()))];
+    const hallIds = hallId ? usedHallIds.filter(id => id === hallId) : usedHallIds;
+    if (hallIds.length === 0) return { error: "No students are seated in this hall for this session" };
+
+    const halls = await Hall.find({ _id: { $in: hallIds } });
+    const uniqueDepts = [...new Set(assignments.map(a => a.departmentId).filter(Boolean))];
+    const allDepts = uniqueDepts.map(d => ({ _id: d, name: d, id: d }));
+
+    const layouts = [];
+    for (const hall of halls) {
+        const buffer = await generateBenchLayoutDocx({
+            hall,
+            seatAssignments: assignments.filter(a => a.hallId.toString() === hall._id.toString()),
+            departments: allDepts,
+            examDate: session.examDate,
+            examSession: session.examSession,
+            examTime: session.examTime,
+            headerSettings: settings
+        });
+        layouts.push({ name: `${hall.name}_Bench_Layout.docx`, buffer });
+    }
+    return { session, layouts };
+};
+
+export const downloadHallLayout = async (req, res) => {
+    try {
+        const { examPlanId, hallId } = req.params;
+        const { error, layouts } = await buildHallLayouts(examPlanId, hallId);
+        if (error) return res.status(404).json({ error });
+
+        const [layout] = layouts;
+        res.attachment(layout.name);
+        res.type("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        res.send(layout.buffer);
+    } catch (error) {
+        console.error("Error generating hall layout:", error);
+        res.status(500).json({ error: "Failed to generate hall layout" });
+    }
+};
+
+export const downloadAllHallLayouts = async (req, res) => {
+    try {
+        const { error, session, layouts } = await buildHallLayouts(req.params.examPlanId);
+        if (error) return res.status(404).json({ error });
+
+        const dateStr = session.examDate.replace(/\//g, "-");
+        res.attachment(`Hall_Layouts_${dateStr}_${session.examSession}.zip`);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        archive.on('error', (err) => {
+            console.error("Archive error:", err);
+            res.status(500).end();
+        });
+        archive.pipe(res);
+        for (const layout of layouts) {
+            archive.append(layout.buffer, { name: layout.name });
+        }
+        await archive.finalize();
+    } catch (error) {
+        console.error("Error generating hall layouts:", error);
+        if (!res.headersSent) {
+            res.status(500).json({ error: "Failed to generate hall layouts" });
+        }
+    }
+};
+
 export const downloadAnnaExamPackage = async (req, res) => {
     try {
         const { examDate, session } = req.params;

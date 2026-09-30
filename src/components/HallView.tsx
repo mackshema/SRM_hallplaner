@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,7 +117,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         if (!hallId) return;
 
         // ✅ CHANGED: Fetch directly from Backend API
-        const res = await fetch(`http://localhost:5000/api/halls/${hallId}`);
+        const res = await fetch(`${API_URL}/halls/${hallId}`);
         if (!res.ok) {
           if (res.status === 404) {
             setHall(null);
@@ -138,7 +139,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         setAllFaculty(facultyList);
 
         // Fetch settings
-        const settingsRes = await fetch('http://localhost:5000/api/settings');
+        const settingsRes = await fetch(`${API_URL}/settings`);
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
@@ -162,8 +163,8 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
     if (!hallId || !hall) return;
 
     const url = examSessionId
-      ? `http://localhost:5000/api/seating/hall/${hallId}?examSessionId=${examSessionId}`
-      : `http://localhost:5000/api/seating/hall/${hallId}`; // Fallback
+      ? `${API_URL}/seating/hall/${hallId}?examSessionId=${examSessionId}`
+      : `${API_URL}/seating/hall/${hallId}`; // Fallback
 
     // Load seating assignments from MongoDB
     fetch(url)
@@ -831,7 +832,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
       }
 
       // SEND TO MONGODB BACKEND
-      const res = await fetch("http://localhost:5000/api/seating/save", {
+      const res = await fetch(`${API_URL}/seating/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -983,7 +984,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
 
     // 1. Save Hall Config (Extra Benches)
     try {
-      await fetch(`http://localhost:5000/api/halls/${hall._id}`, {
+      await fetch(`${API_URL}/halls/${hall._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ extraBenches })

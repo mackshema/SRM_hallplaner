@@ -8,7 +8,9 @@ import {
     assignFacultyToHall,
     updateHall,
     getAllExamDates,
-    bulkCreateHalls
+    bulkCreateHalls,
+    divideHall,
+    mergeHalls
 } from "../controllers/hallController.js";
 
 const router = express.Router();
@@ -16,6 +18,8 @@ router.use(requireAdmin);
 
 router.post("/", createHall);
 router.post("/bulk-create", bulkCreateHalls);
+router.post("/divide", divideHall);
+router.post("/merge", mergeHalls);
 router.get("/all-exam-dates", getAllExamDates);
 router.get("/", getAllHalls);
 router.get("/:id", getHallById);

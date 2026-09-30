@@ -35,3 +35,5 @@ backend/logs/
 
 # Backups
 backend/backups/
+*.timestamp*
+

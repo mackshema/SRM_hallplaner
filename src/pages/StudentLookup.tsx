@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import {
     Card,
@@ -62,7 +63,7 @@ const StudentLookup = () => {
         const fetchDetails = async () => {
             setIsLoading(true);
             try {
-                const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/${currentUser.username}`);
+                const response = await fetch(`${API_URL}/student/${currentUser.username}`);
                 if (response.ok) {
                     const data = await response.json();
                     setExamDetails(data);
@@ -115,7 +116,7 @@ const StudentLookup = () => {
 
         setIsChangingPassword(true);
         try {
-            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/change-password`, {
+            const response = await fetch(`${API_URL}/student/change-password`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

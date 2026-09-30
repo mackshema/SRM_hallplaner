@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { API_URL } from "@/lib/api";
 import { 
     Users, Plus, Upload, Trash2, Edit2, Download, AlertCircle, FileSpreadsheet, Loader2, 
     ChevronRight, Folder, FolderOpen, GraduationCap, LayoutGrid, ArrowLeft
@@ -23,11 +24,13 @@ import ExcelUploadHelper from "@/components/ExcelUploadHelper";
 interface Student {
     _id: string;
     name: string;
-    username: string; // Roll number
+    username: string; // Roll number / Register number
     email?: string;
     program?: string;
     degree?: string; // Corresponds to Level/Year
     department?: string;
+    regulation?: string;
+    branch?: string;
     plainPassword?: string;
 }
 
@@ -38,13 +41,13 @@ interface AcademicStructure {
 }
 
 const defaultStructure: AcademicStructure = {
-    "Engineering": {
+    "UG": {
         "Year 1": [],
         "Year 2": [],
         "Year 3": [],
         "Year 4": []
     },
-    "MBA": {
+    "PG": {
         "Year 1": [],
         "Year 2": []
     }
@@ -58,7 +61,7 @@ const StudentsManagement = () => {
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (typeof parsed === 'object' && parsed !== null) {
-                    return parsed;
+                    return { ...defaultStructure, ...parsed };
                 }
             }
         } catch (error) {
@@ -86,7 +89,7 @@ const StudentsManagement = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [currentStudentId, setCurrentStudentId] = useState<string | null>(null);
-    const [formData, setFormData] = useState<{name: string, rollNumber: string, email: string, program?: string, degree?: string, department?: string}>({ name: "", rollNumber: "", email: "" });
+    const [formData, setFormData] = useState<{name: string, rollNumber: string, email: string, program?: string, degree?: string, department?: string, regulation?: string, branch?: string}>({ name: "", rollNumber: "", email: "" });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [skipEmail, setSkipEmail] = useState(false);
 
@@ -105,7 +108,7 @@ const StudentsManagement = () => {
     // Bulk Upload
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isUploading, setIsUploading] = useState(false);
-    const [uploadStats, setUploadStats] = useState<{total: number, success: number, skipped: number, skippedReasons: any[]} | null>(null);
+    const [uploadStats, setUploadStats] = useState<{total: number, success: number, updated: number, skipped: number, skippedReasons: any[], updatedReasons: any[]} | null>(null);
     const [isUploadResultOpen, setIsUploadResultOpen] = useState(false);
     const [isGlobalUploadOpen, setIsGlobalUploadOpen] = useState(false);
 
@@ -116,7 +119,7 @@ const StudentsManagement = () => {
     const fetchStudents = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student`);
+            const res = await fetch(`${API_URL}/student`);
             if (res.ok) {
                 const data = await res.json();
                 setStudents(data);
@@ -238,9 +241,11 @@ const StudentsManagement = () => {
             name: "", 
             rollNumber: "", 
             email: "", 
-            program: selectedProgram || "", 
+            program: selectedProgram || "UG", 
             degree: selectedDegree || "", 
-            department: selectedDepartment || "" 
+            department: selectedDepartment || "",
+            regulation: "",
+            branch: ""
         });
         setSkipEmail(false);
         setIsModalOpen(true);
@@ -255,7 +260,9 @@ const StudentsManagement = () => {
             email: student.email || "",
             program: student.program,
             degree: student.degree,
-            department: student.department
+            department: student.department,
+            regulation: student.regulation || "",
+            branch: student.branch || ""
         });
         setSkipEmail(false);
         setIsModalOpen(true);
@@ -271,7 +278,7 @@ const StudentsManagement = () => {
         setIsSubmitting(true);
         try {
             if (isEditing && currentStudentId) {
-                const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/${currentStudentId}`, {
+                const res = await fetch(`${API_URL}/student/${currentStudentId}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ 
@@ -294,7 +301,7 @@ const StudentsManagement = () => {
             } else {
                 const password = "student123"; 
                 
-                const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/create-account`, {
+                const res = await fetch(`${API_URL}/student/create-account`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ 
@@ -325,7 +332,7 @@ const StudentsManagement = () => {
     const confirmDelete = async () => {
         if (!studentToDelete) return;
         try {
-            const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/${studentToDelete._id}`, {
+            const res = await fetch(`${API_URL}/student/${studentToDelete._id}`, {
                 method: "DELETE"
             });
             if (res.ok) {
@@ -363,7 +370,7 @@ const StudentsManagement = () => {
         setIsSubmitting(true);
         try {
             await Promise.all(selectedStudents.map(id => 
-                fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/${id}`, { method: "DELETE" })
+                fetch(`${API_URL}/student/${id}`, { method: "DELETE" })
             ));
             toast({ title: "Deleted", description: `${selectedStudents.length} students have been removed.` });
             setSelectedStudents([]);
@@ -376,6 +383,214 @@ const StudentsManagement = () => {
     };
 
     // --- Excel Upload Logic ---
+    const parseStudentWorkbook = (wb: XLSX.WorkBook, contextProgram?: string | null, contextDegree?: string | null, contextDepartment?: string | null) => {
+        const formattedStudents: any[] = [];
+        const newStructure: AcademicStructure = JSON.parse(JSON.stringify(structure));
+        let structureChanged = false;
+
+        const yearMap: { [key: string]: string } = {
+            'I': 'Year 1',
+            'II': 'Year 2',
+            'III': 'Year 3',
+            'IV': 'Year 4',
+            '1': 'Year 1',
+            '2': 'Year 2',
+            '3': 'Year 3',
+            '4': 'Year 4',
+            'YEAR 1': 'Year 1',
+            'YEAR 2': 'Year 2',
+            'YEAR 3': 'Year 3',
+            'YEAR 4': 'Year 4',
+        };
+
+        const normalizeYear = (yrStr?: any): string => {
+            if (!yrStr) return contextDegree || 'Year 1';
+            const cleaned = String(yrStr).trim().toUpperCase();
+            if (yearMap[cleaned]) return yearMap[cleaned];
+            if (cleaned.startsWith('YEAR')) return String(yrStr).trim();
+            return `Year ${cleaned}`;
+        };
+
+        const deptMap: { [key: string]: string } = {
+            'CIVIL': 'Civil',
+            'CSE': 'CSE',
+            'EEE': 'EEE',
+            'ECE': 'ECE',
+            'MECH': 'Mech',
+            'AIML': 'AIML',
+            'CYBER': 'Cyber',
+            'IT': 'IT',
+            'AIDS': 'AIDS'
+        };
+
+        const normalizeDept = (sheetName: string, branchStr?: string): string => {
+            const sName = String(sheetName).trim().toUpperCase();
+            if (deptMap[sName]) return deptMap[sName];
+
+            if (branchStr) {
+                const bUpper = branchStr.toUpperCase();
+                if (bUpper.includes('CIVIL')) return 'Civil';
+                if (bUpper.includes('ARTIFICIAL INTELLIGENCE AND MACHINE LEARNING') || bUpper.includes('AI & ML') || bUpper.includes('AIML')) return 'AIML';
+                if (bUpper.includes('CYBER')) return 'Cyber';
+                if (bUpper.includes('COMPUTER SCIENCE')) return 'CSE';
+                if (bUpper.includes('ELECTRICAL AND ELECTRONICS')) return 'EEE';
+                if (bUpper.includes('ELECTRONICS AND COMMUNICATION')) return 'ECE';
+                if (bUpper.includes('MECHANICAL')) return 'Mech';
+                if (bUpper.includes('INFORMATION TECHNOLOGY')) return 'IT';
+                if (bUpper.includes('ARTIFICIAL INTELLIGENCE AND DATA SCIENCE') || bUpper.includes('AIDS')) return 'AIDS';
+            }
+
+            return contextDepartment || sheetName.trim();
+        };
+
+        const determineProgram = (branchStr?: string, defaultProg?: string | null): string => {
+            if (defaultProg && defaultProg !== 'General' && defaultProg !== 'Engineering') return defaultProg;
+            if (branchStr) {
+                const bUpper = branchStr.toUpperCase();
+                if (bUpper.includes('M.E.') || bUpper.includes('M.TECH') || bUpper.includes('MBA') || bUpper.includes('M.B.A.') || bUpper.includes('MCA') || bUpper.includes('M.C.A.')) {
+                    return 'PG';
+                }
+                if (bUpper.includes('B.E.') || bUpper.includes('B.TECH') || bUpper.includes('B.ARCH') || bUpper.includes('B.SC') || bUpper.includes('B.A.')) {
+                    return 'UG';
+                }
+            }
+            return defaultProg || 'UG';
+        };
+
+        const ignoredSheets = ['DEPT WISE STUDENTS COUNT', 'DISCONTINUED-TC-TRANSFERRED'];
+
+        wb.SheetNames.forEach(sheetName => {
+            const upperSheetName = sheetName.trim().toUpperCase();
+            if (ignoredSheets.includes(upperSheetName)) return;
+
+            const sheet = wb.Sheets[sheetName];
+            const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+            // Check if multi-section header format exists (Regulation, Year, Branch)
+            let isMultiSection = false;
+            for (let r of rows) {
+                if (Array.isArray(r) && r[0] === 'Regulation' && r[1] === 'Year' && r[2] === 'Branch') {
+                    isMultiSection = true;
+                    break;
+                }
+            }
+
+            if (isMultiSection) {
+                let currentRegulation = '';
+                let currentYear = '';
+                let currentBranch = '';
+                let currentDept = normalizeDept(sheetName, '');
+
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row || row.length === 0) continue;
+
+                    // Header section row
+                    if (row[0] === 'Regulation' && row[1] === 'Year' && row[2] === 'Branch') {
+                        const nextRow = rows[i + 1];
+                        if (nextRow) {
+                            currentRegulation = nextRow[0] ? String(nextRow[0]).trim() : '';
+                            currentYear = nextRow[1] ? String(nextRow[1]).trim() : '';
+                            currentBranch = nextRow[2] ? String(nextRow[2]).trim() : '';
+                            currentDept = normalizeDept(sheetName, currentBranch);
+                        }
+                        i++; // skip next row
+                        continue;
+                    }
+
+                    if (row[0] === 'S.No.' || row[1] === 'Register Number' || row[0] === 'Register Number') continue;
+
+                    let rollNumber = row[1] || row[0];
+                    let name = row[2] || row[1];
+
+                    if (String(rollNumber).match(/^\d{10,14}$/) && typeof name === 'string' && isNaN(Number(name))) {
+                        // Valid
+                    } else if (String(row[0]).match(/^\d{10,14}$/) && typeof row[1] === 'string' && isNaN(Number(row[1]))) {
+                        rollNumber = row[0];
+                        name = row[1];
+                    } else {
+                        continue;
+                    }
+
+                    rollNumber = String(rollNumber).trim();
+                    name = String(name).trim();
+
+                    if (rollNumber && name) {
+                        const yearFormatted = normalizeYear(currentYear);
+                        const programFormatted = determineProgram(currentBranch, contextProgram);
+
+                        if (!newStructure[programFormatted]) {
+                            newStructure[programFormatted] = {};
+                            structureChanged = true;
+                        }
+                        if (!newStructure[programFormatted][yearFormatted]) {
+                            newStructure[programFormatted][yearFormatted] = [];
+                            structureChanged = true;
+                        }
+                        if (!newStructure[programFormatted][yearFormatted].includes(currentDept)) {
+                            newStructure[programFormatted][yearFormatted].push(currentDept);
+                            structureChanged = true;
+                        }
+
+                        formattedStudents.push({
+                            name,
+                            rollNumber,
+                            email: '',
+                            password: 'student123',
+                            program: programFormatted,
+                            degree: yearFormatted,
+                            department: currentDept,
+                            regulation: currentRegulation,
+                            branch: currentBranch
+                        });
+                    }
+                }
+            } else {
+                // Standard flat table fallback
+                const data: any[] = XLSX.utils.sheet_to_json(sheet);
+                data.forEach(row => {
+                    const rawBranch = row["Branch"] || row["branch"] || "";
+                    const prog = determineProgram(rawBranch, row["Program"] || row["program"] || contextProgram);
+                    const rawYr = row["Year"] || row["year"] || row["Degree"] || row["degree"] || contextDegree || "Year 1";
+                    const deg = normalizeYear(rawYr);
+                    const dept = row["Department"] || row["department"] || contextDepartment || sheetName.trim();
+
+                    const name = row["Name"] || row["name"] || row["Student Name"];
+                    const rollNumber = String(row["Roll Number"] || row["rollNumber"] || row["Register Number"] || row["RegisterNumber"] || "");
+
+                    if (name && rollNumber) {
+                        if (!newStructure[prog]) {
+                            newStructure[prog] = {};
+                            structureChanged = true;
+                        }
+                        if (!newStructure[prog][deg]) {
+                            newStructure[prog][deg] = [];
+                            structureChanged = true;
+                        }
+                        if (!newStructure[prog][deg].includes(dept)) {
+                            newStructure[prog][deg].push(dept);
+                            structureChanged = true;
+                        }
+
+                        formattedStudents.push({
+                            name: String(name).trim(),
+                            rollNumber: String(rollNumber).trim(),
+                            email: row["Email"] || row["email"] || "",
+                            password: "student123",
+                            program: String(prog).trim(),
+                            degree: deg,
+                            department: String(dept).trim(),
+                            regulation: row["Regulation"] || row["regulation"] || "",
+                            branch: rawBranch
+                        });
+                    }
+                });
+            }
+        });
+
+        return { formattedStudents, newStructure, structureChanged };
+    };
+
     const handleGlobalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -387,42 +602,13 @@ const StudentsManagement = () => {
             try {
                 const bstr = evt.target?.result;
                 const wb = XLSX.read(bstr, { type: 'binary' });
-                const wsname = wb.SheetNames[0];
-                const ws = wb.Sheets[wsname];
-                const data = XLSX.utils.sheet_to_json(ws);
-                
-                const newStructure = { ...structure };
-                let structureChanged = false;
 
-                const formattedStudents = data.map((row: any) => {
-                    const prog = row["Program"] || row["program"] || selectedProgram || "General";
-                    const deg = row["Year"] || row["year"] || row["Degree"] || row["degree"] || selectedDegree || "Year 1";
-                    const dept = row["Department"] || row["department"] || selectedDepartment || "General";
-
-                    // Update structure logically
-                    if (!newStructure[prog]) {
-                        newStructure[prog] = {};
-                        structureChanged = true;
-                    }
-                    if (!newStructure[prog][deg]) {
-                        newStructure[prog][deg] = [];
-                        structureChanged = true;
-                    }
-                    if (!newStructure[prog][deg].includes(dept)) {
-                        newStructure[prog][deg].push(dept);
-                        structureChanged = true;
-                    }
-
-                    return {
-                        name: row["Name"] || row["name"],
-                        rollNumber: String(row["Roll Number"] || row["rollNumber"] || row["RollNumber"] || ""),
-                        email: row["Email"] || row["email"] || "",
-                        password: "student123",
-                        program: prog,
-                        degree: deg,
-                        department: dept
-                    };
-                }).filter(s => s.name && s.rollNumber);
+                const { formattedStudents, newStructure, structureChanged } = parseStudentWorkbook(
+                    wb,
+                    selectedProgram,
+                    selectedDegree,
+                    selectedDepartment
+                );
 
                 if (formattedStudents.length === 0) {
                     toast({ title: "Invalid File", description: "No valid student records found.", variant: "destructive" });
@@ -433,7 +619,7 @@ const StudentsManagement = () => {
                     setStructure(newStructure);
                 }
 
-                const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/student/bulk-create`, {
+                const res = await fetch(`${API_URL}/student/bulk-create`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ students: formattedStudents })
@@ -443,9 +629,11 @@ const StudentsManagement = () => {
                     const result = await res.json();
                     setUploadStats({
                         total: formattedStudents.length,
-                        success: result.createdCount,
-                        skipped: result.skippedCount,
-                        skippedReasons: result.skippedDetailed
+                        success: result.createdCount || 0,
+                        updated: result.updatedCount || 0,
+                        skipped: result.skippedCount || 0,
+                        skippedReasons: result.skippedDetailed || [],
+                        updatedReasons: result.updatedDetailed || []
                     });
                     setIsGlobalUploadOpen(false);
                     setIsUploadResultOpen(true);
@@ -466,24 +654,43 @@ const StudentsManagement = () => {
     };
 
     const downloadTemplate = (isGlobal = false) => {
-        const templateData = isGlobal ? 
-            { "Name": "Chaitanya", "Roll Number": "91112314900X", "Email": "student@college.edu", "Program": "Engineering", "Year": "Year 2", "Department": "CSE" } :
-            { "Name": "Chaitanya", "Roll Number": "91112314900X", "Email": "student@college.edu" };
-
-        const ws = XLSX.utils.json_to_sheet([templateData]);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Students");
-        XLSX.writeFile(wb, isGlobal ? "Global_Student_Upload_Template.xlsx" : "Student_Upload_Template.xlsx");
+
+        const cseRows = [
+            ["Regulation", "Year", "Branch"],
+            [2025, "II", "104 - B.E. Computer Science and Engineering"],
+            ["S.No.", "Register Number", "Student Name"],
+            [1, "911125104001", "AANANDHA RUBAN M R K"],
+            [2, "911125104002", "AATHISH RAO A B"]
+        ];
+
+        const eceRows = [
+            ["Regulation", "Year", "Branch"],
+            [2025, "II", "106 - B.E. Electronics and Communication Engineering"],
+            ["S.No.", "Register Number", "Student Name"],
+            [1, "911125106001", "AADHIL AHAMED A"],
+            [2, "911125106002", "AADHIRA SANTHOSI V"]
+        ];
+
+        const wsCSE = XLSX.utils.aoa_to_sheet(cseRows);
+        const wsECE = XLSX.utils.aoa_to_sheet(eceRows);
+
+        XLSX.utils.book_append_sheet(wb, wsCSE, "CSE");
+        XLSX.utils.book_append_sheet(wb, wsECE, "ECE");
+
+        XLSX.writeFile(wb, isGlobal ? "Updated_Student_Upload_Template.xlsx" : "Student_Upload_Template.xlsx");
     };
 
-    const filteredStudents = students.filter(student => 
-        student.program === selectedProgram &&
-        student.degree === selectedDegree && 
-        student.department === selectedDepartment &&
-        ((student.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (student.username || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (student.email && student.email.toLowerCase().includes(searchTerm.toLowerCase())))
-    );
+    const filteredStudents = students
+        .filter(student => 
+            student.program === selectedProgram &&
+            student.degree === selectedDegree && 
+            student.department === selectedDepartment &&
+            ((student.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (student.username || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (student.email && student.email.toLowerCase().includes(searchTerm.toLowerCase())))
+        )
+        .sort((a, b) => (a.username || "").localeCompare(b.username || "", undefined, { numeric: true, sensitivity: 'base' }));
 
     // --- Render Helpers ---
     const breadcrumbs = (
@@ -786,28 +993,30 @@ const StudentsManagement = () => {
                                                     onCheckedChange={(c) => handleSelectAll(c === true)}
                                                 />
                                             </TableHead>
-                                            <TableHead>Roll Number</TableHead>
-                                            <TableHead>Name</TableHead>
-                                            <TableHead>Email Address</TableHead>
-                                            <TableHead>Password</TableHead>
-                                            <TableHead className="text-right">Actions</TableHead>
+                                            <TableHead className="w-16 font-semibold text-slate-700">S.No.</TableHead>
+                                            <TableHead className="font-semibold text-slate-700">Register Number</TableHead>
+                                            <TableHead className="font-semibold text-slate-700">Student Name</TableHead>
+                                            <TableHead className="font-semibold text-slate-700">Regulation</TableHead>
+                                            <TableHead className="font-semibold text-slate-700">Branch</TableHead>
+                                            <TableHead className="font-semibold text-slate-700">Email Address</TableHead>
+                                            <TableHead className="text-right font-semibold text-slate-700">Actions</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {isLoading ? (
                                             <TableRow>
-                                                <TableCell colSpan={6} className="h-24 text-center">
+                                                <TableCell colSpan={8} className="h-24 text-center">
                                                     <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
                                                 </TableCell>
                                             </TableRow>
                                         ) : filteredStudents.length === 0 ? (
                                             <TableRow>
-                                                <TableCell colSpan={6} className="h-32 text-center text-slate-500">
+                                                <TableCell colSpan={8} className="h-32 text-center text-slate-500">
                                                     No students found in {selectedDepartment}.
                                                 </TableCell>
                                             </TableRow>
                                         ) : (
-                                            filteredStudents.map((student) => (
+                                            filteredStudents.map((student, idx) => (
                                                 <TableRow key={student._id}>
                                                     <TableCell>
                                                         <Checkbox 
@@ -815,10 +1024,18 @@ const StudentsManagement = () => {
                                                             onCheckedChange={(c) => handleSelectStudent(student._id, c === true)}
                                                         />
                                                     </TableCell>
-                                                    <TableCell className="font-medium">{student.username}</TableCell>
-                                                    <TableCell>{student.name}</TableCell>
-                                                    <TableCell className="text-slate-600">{student.email || <span className="text-slate-400 italic">Not Provided</span>}</TableCell>
-                                                    <TableCell className="font-mono text-sm text-blue-600 bg-blue-50/30">{student.plainPassword || "student123"}</TableCell>
+                                                    <TableCell className="text-xs text-slate-500 font-mono">{idx + 1}</TableCell>
+                                                    <TableCell className="font-semibold font-mono text-slate-800">{student.username}</TableCell>
+                                                    <TableCell className="font-medium text-slate-900">{student.name}</TableCell>
+                                                    <TableCell>
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                                            {student.regulation || "—"}
+                                                        </span>
+                                                    </TableCell>
+                                                    <TableCell className="text-xs text-slate-600 max-w-xs truncate" title={student.branch}>
+                                                        {student.branch || student.department || "—"}
+                                                    </TableCell>
+                                                    <TableCell className="text-slate-600 text-xs">{student.email || <span className="text-slate-400 italic">Not Provided</span>}</TableCell>
                                                     <TableCell className="text-right">
                                                         <div className="flex justify-end gap-2">
                                                             <Button variant="ghost" size="icon" onClick={() => openEditModal(student)}>
@@ -970,9 +1187,21 @@ const StudentsManagement = () => {
                                     value={formData.name} onChange={handleInputChange} />
                             </div>
                             <div className="grid gap-2">
-                                <Label htmlFor="rollNumber">Roll Number (Username) <span className="text-red-500">*</span></Label>
-                                <Input id="rollNumber" name="rollNumber" placeholder="e.g., 911123..." required
+                                <Label htmlFor="rollNumber">Register Number (Username) <span className="text-red-500">*</span></Label>
+                                <Input id="rollNumber" name="rollNumber" placeholder="e.g., 911123104001" required
                                     value={formData.rollNumber} onChange={handleInputChange} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <Label htmlFor="regulation" className="text-xs">Regulation</Label>
+                                    <Input id="regulation" name="regulation" placeholder="e.g., 2025"
+                                        value={formData.regulation || ""} onChange={handleInputChange} />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="branch" className="text-xs">Branch</Label>
+                                    <Input id="branch" name="branch" placeholder="e.g., 104 - B.E. CSE"
+                                        value={formData.branch || ""} onChange={handleInputChange} />
+                                </div>
                             </div>
                             <div className="grid gap-2">
                                 <Label htmlFor="email">Email Address</Label>
@@ -1034,19 +1263,9 @@ const StudentsManagement = () => {
                     
                     <div className="space-y-6 pt-4">
                         <ExcelUploadHelper
-                            columns={[
-                                { header: "Name",        example: "Chaitanya Kumar", required: true,  description: "Full name" },
-                                { header: "Roll Number", example: "911123149001",    required: true,  description: "Username" },
-                                { header: "Program",     example: "Engineering",     required: true,  description: "e.g. Engineering, MBA" },
-                                { header: "Year",        example: "Year 2",          required: true,  description: "Year or Category" },
-                                { header: "Department",  example: "CSE",             required: true,  description: "Dept name" },
-                                { header: "Email",       example: "student@srm.edu", required: false, description: "Optional email" },
-                            ]}
                             templateFilename="Global_Student_Upload_Template.xlsx"
-                            sampleRows={[
-                                { "Name": "Alice Smith", "Roll Number": "2024CSE001", "Program": "Engineering", "Year": "Year 1", "Department": "CSE" },
-                                { "Name": "Bob Jones", "Roll Number": "2024MBA005", "Program": "MBA", "Year": "Year 1", "Department": "Finance" },
-                            ]}
+                            multiSectionMode={true}
+                            note="Reads department sheets (CSE, ECE, Civil, etc.) with Regulation/Year/Branch sections. Automatically creates new departments/years in UG/PG if missing."
                         />
 
                         <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 gap-4">
@@ -1101,27 +1320,50 @@ const StudentsManagement = () => {
                     
                     {uploadStats && (
                         <div className="py-4 space-y-4">
-                            <div className="grid grid-cols-2 gap-4 text-center">
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                    <div className="text-3xl font-bold text-slate-800">{uploadStats.total}</div>
-                                    <div className="text-sm font-medium text-slate-500 mt-1">Found in Excel</div>
+                            <div className="grid grid-cols-3 gap-3 text-center">
+                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                    <div className="text-2xl font-bold text-slate-800">{uploadStats.total}</div>
+                                    <div className="text-xs font-medium text-slate-500 mt-1">Found in Excel</div>
                                 </div>
-                                <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-                                    <div className="text-3xl font-bold text-green-600">{uploadStats.success}</div>
-                                    <div className="text-sm font-medium text-green-700 mt-1">Successfully Added</div>
+                                <div className="bg-green-50 p-3 rounded-xl border border-green-200">
+                                    <div className="text-2xl font-bold text-green-600">{uploadStats.success}</div>
+                                    <div className="text-xs font-medium text-green-700 mt-1">Newly Created</div>
+                                </div>
+                                <div className="bg-blue-50 p-3 rounded-xl border border-blue-200">
+                                    <div className="text-2xl font-bold text-blue-600">{uploadStats.updated}</div>
+                                    <div className="text-xs font-medium text-blue-700 mt-1">Old Records Edited</div>
                                 </div>
                             </div>
                             
-                            {uploadStats.skipped > 0 && (
-                                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 mt-4">
-                                    <h4 className="font-semibold text-amber-900 flex items-center gap-2 mb-2">
-                                        <AlertCircle className="h-4 w-4" /> 
-                                        {uploadStats.skipped} Students Skipped
+                            {uploadStats.updated > 0 && (
+                                <div className="bg-blue-50/80 p-4 rounded-xl border border-blue-200">
+                                    <h4 className="font-semibold text-blue-900 flex items-center gap-2 mb-2 text-xs">
+                                        <AlertCircle className="h-4 w-4 text-blue-600" /> 
+                                        Notice: {uploadStats.updated} Existing Student Records Updated
                                     </h4>
-                                    <ul className="text-sm text-amber-800 space-y-1 max-h-32 overflow-y-auto pl-6 list-disc">
+                                    <p className="text-xs text-blue-800 mb-2">
+                                        These register numbers already existed in the system. Their profiles have been updated with the newly uploaded dataset info.
+                                    </p>
+                                    <ul className="text-xs text-blue-800 space-y-1 max-h-28 overflow-y-auto pl-5 list-disc">
+                                        {uploadStats.updatedReasons.map((item, idx) => (
+                                            <li key={idx}>
+                                                <b>{item.rollNumber}</b> ({item.name}) — updated with new data
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            {uploadStats.skipped > 0 && (
+                                <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
+                                    <h4 className="font-semibold text-amber-900 flex items-center gap-2 mb-2 text-xs">
+                                        <AlertCircle className="h-4 w-4 text-amber-600" /> 
+                                        {uploadStats.skipped} Rows Skipped
+                                    </h4>
+                                    <ul className="text-xs text-amber-800 space-y-1 max-h-28 overflow-y-auto pl-5 list-disc">
                                         {uploadStats.skippedReasons.map((reason, idx) => (
                                             <li key={idx}>
-                                                <b>{reason.rollNumber}</b>: {reason.reason}
+                                                <b>{reason.rollNumber || "Row"}</b>: {reason.reason}
                                             </li>
                                         ))}
                                     </ul>

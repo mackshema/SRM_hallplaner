@@ -7,6 +7,7 @@ const Faculty = User; // Alias for readability in this file
 import FacultyDuty from "../models/FacultyDuty.js";
 import SeatingPlan from "../models/SeatingPlan.js";
 import InternalExamData from "../models/InternalExamData.js"; // AL-01
+import { previousSession as findPreviousSession, dutiesFromAssignments } from "../utils/facultyDuties.js";
 
 const getDateDaysAgo = (dateStr, days) => {
   const d = new Date(dateStr);
@@ -226,16 +227,31 @@ export const generateSeatingPlan = async (req, res) => {
     const nameMap = {};
     allStudents.forEach(s => { nameMap[s.username] = s.name || ''; });
 
-    // AL-01: Build subject snapshot map (rollNumber → subjectCode) from InternalExamData
-    const internalData = await InternalExamData.find({}).lean();
+    // Follow the timetable: seat only students with an exam in THIS session, matched the
+    // same way as automatic generation (roll-number mapping first, else department + year).
+    // Sessions created by hand with no timetable rows keep seating every selected student.
+    // AL-01: subjectMap (rollNumber → subjectCode) doubles as the subject snapshot.
+    const scheduled = await InternalExamData.find({ examDate, session: examSession }).lean();
     const subjectMap = {};
-    internalData.forEach(d => {
-      if (d.rollNumber) subjectMap[d.rollNumber] = d.subjectCode || null;
-    });
+    let sessionStudents = allStudents;
+    if (scheduled.length > 0) {
+      sessionStudents = allStudents.filter(s => {
+        const sub = scheduled.find(x => x.rollNumber === s.username) ||
+          scheduled.find(x => !x.rollNumber && x.department === s.department && x.year === s.degree);
+        if (sub) subjectMap[s.username] = sub.subjectCode || null;
+        return !!sub;
+      });
+      if (!sessionStudents.length) {
+        return res.status(400).json({ message: "No students match this session's timetable (check Department and Year)." });
+      }
+    } else {
+      const internalData = await InternalExamData.find({ rollNumber: { $nin: [null, ""] } }).lean();
+      internalData.forEach(d => { subjectMap[d.rollNumber] = d.subjectCode || null; });
+    }
 
     const generationWarnings = []; // AL-03: silent warning collector
     const deptMap = {};
-    allStudents.forEach(s => {
+    sessionStudents.forEach(s => {
         if (!s.department) {
             console.warn('Student missing department, excluded from seating:', s.username);
             generationWarnings.push({
@@ -615,6 +631,13 @@ export const generateSeatingPlan = async (req, res) => {
           }
         }
       }
+
+      // Students pulled into this hall's batch but left unplaced (adjacency rules
+      // left seats empty) go back into their queue at the read pointer, so the next
+      // hall picks them up - or they are reported as unallocated below.
+      for (const [dId, leftover] of hallBatch) {
+        if (leftover.length > 0) deptQueues[dId].splice(deptPtrs[dId], 0, ...leftover);
+      }
     }
 
     // Save Student Assignments
@@ -626,37 +649,27 @@ export const generateSeatingPlan = async (req, res) => {
     // STEP 2 & 3: FACULTY ALLOCATION LOGIC
     // ============================================
 
-    // 2.1 Fetch Previous Session to enforce "No Continuous Participation"
-    let previousSession = null;
-    if (session.examSession === "AN") {
-      previousSession = { examDate: session.examDate, examSession: "FN" };
-    } else {
-      const prevSessionDoc = await ExamSession.findOne({ examDate: { $lt: session.examDate } }).sort({ examDate: -1, examSession: -1 });
-      if (prevSessionDoc) {
-        previousSession = { examDate: prevSessionDoc.examDate, examSession: prevSessionDoc.examSession };
-      }
-    }
+    // 2.1 Other sessions: needed for "No Continuous Participation" (previous session is
+    // resolved in 2.3) and because their draft invigilators count as duties too.
+    const otherSessions = await ExamSession.find({ _id: { $ne: examSessionId } })
+      .select('examDate examSession status facultyAssignments').lean();
 
     // 2.2 Fetch ALL Eligible Faculty
     // Support for "Demand" (Admin overrides for continuous participation or extra pool)
     const demandFacultyIdsInput = req.body.demandFacultyIds || [];
     const demandFacultyIds = demandFacultyIdsInput.map(id => id.toString());
 
-    // Fetch faculty members based on session-specific selection or legacy global flag
+    // Fetch all active faculty members (role: "faculty") for internal exam allocation
     let facultyQuery = { role: "faculty" };
     if (session.selectedFaculty && session.selectedFaculty.length > 0) {
-      // Use specific selection for this session + any extra "demand" overrides
-      const combinedIds = [...new Set([
-        ...session.selectedFaculty.map(id => id.toString()),
-        ...demandFacultyIds
-      ])];
-      facultyQuery._id = { $in: combinedIds };
-    } else {
-      // Fallback to legacy global selection OR current demand
-      facultyQuery.$or = [
-        { isSelectedForGeneration: true },
-        { _id: { $in: demandFacultyIds } }
-      ];
+      // Fetch session-selected faculty, demand faculty, plus any newly created faculty
+      facultyQuery = {
+        role: "faculty",
+        $or: [
+          { _id: { $in: [...session.selectedFaculty.map(id => id.toString()), ...demandFacultyIds] } },
+          { isSelectedForGeneration: true }
+        ]
+      };
     }
 
     const allFaculty = await Faculty.find(facultyQuery).lean();
@@ -666,9 +679,18 @@ export const generateSeatingPlan = async (req, res) => {
     const sevenDaysAgo = getDateDaysAgo(examDateStr, 7);
 
     // Query recent duties for "no continuous participation" and "weekly duty limit" checks
-    const recentDuties = await FacultyDuty.find({
+    const savedDuties = await FacultyDuty.find({
       examDate: { $gte: sevenDaysAgo, $lte: examDateStr }
     }).select('facultyId examDate examSession').lean();
+    // Draft sessions have invigilators but no FacultyDuty records until finalized
+    const draftDuties = otherSessions
+      .filter(s => s.status !== 'FINAL')
+      .flatMap(s => dutiesFromAssignments(s.examDate, s.examSession, s.facultyAssignments))
+      .filter(d => d.examDate >= sevenDaysAgo && d.examDate <= examDateStr);
+    const recentDuties = [...savedDuties, ...draftDuties];
+
+    // Previous session: same-day FN for an AN session, otherwise the latest earlier one
+    const previousSession = findPreviousSession(examDateStr, session.examSession, [...otherSessions, ...recentDuties]);
 
     // Build lookup Set for previous session duties
     const prevSessionKey = previousSession ? `${previousSession.examDate}_${previousSession.examSession}` : null;

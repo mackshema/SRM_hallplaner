@@ -16,12 +16,14 @@ internalExamDataSchema.index({
   department: 1
 });
 
-// Also add a unique constraint to prevent duplicate timetable entries
+// Lookup index for timetable imports. Deliberately NOT unique: per-student rows
+// (manual maps) share subject/department/date/session with each other, and
+// duplicate class rows are already prevented by the upserts in
+// utils/timetableImport.js. The old unique version is dropped in config/migrations.js.
 internalExamDataSchema.index({
   subjectCode: 1,
   department: 1,
-  examDate: 1,
-  session: 1
-}, { unique: true });
+  year: 1
+});
 
 export default mongoose.model("InternalExamData", internalExamDataSchema);

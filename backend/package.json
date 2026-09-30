@@ -13,7 +13,9 @@
     "logs:pm2": "pm2 logs hall-harmony-backend",
     "status:pm2": "pm2 status",
     "backup": "node scripts/backup.js",
-    "restore": "echo 'Usage: mongorestore --db exam_hall_allotment ./backups/<folder>/exam_hall_allotment'"
+    "restore": "echo 'Usage: mongorestore --db exam_hall_allotment ./backups/<folder>/exam_hall_allotment'",
+    "test:api": "node tests/api.test.js",
+    "test:data": "node scripts/generate_test_data.js"
   },
   "keywords": [],
   "author": "",

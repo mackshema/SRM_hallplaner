@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { API_URL } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +26,7 @@ const Settings = () => {
 
     const fetchSettings = async () => {
         try {
-            const res = await fetch('http://localhost:5000/api/settings');
+            const res = await fetch(`${API_URL}/settings`);
             if (res.ok) {
                 const data = await res.json();
                 setSettings({
@@ -71,7 +72,7 @@ const Settings = () => {
         e.preventDefault();
         setSaving(true);
         try {
-            const res = await fetch('http://localhost:5000/api/settings', {
+            const res = await fetch(`${API_URL}/settings`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(settings)

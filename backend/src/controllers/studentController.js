@@ -87,7 +87,7 @@ export const getStudentExamDetails = async (req, res) => {
                         floor: "N/A", // Anna University seating doesn't always store floor in assignment
                         date: plan.examDate,
                         session: plan.session,
-                        time: "09:30 AM", // Standard Anna University time if not specified
+                        time: plan.session === 'FN' ? '09:30 AM' : '02:00 PM', // Anna slot times (see resolveExamTime)
                         rollNumber: myAssignment.rollNumber,
                         seatPosition: `Row ${myAssignment.row} - Column ${myAssignment.column} - Seat ${myAssignment.benchPosition}`,
                         type: "Anna University"
@@ -114,7 +114,7 @@ export const getStudentExamDetails = async (req, res) => {
  */
 export const createStudentAccount = async (req, res) => {
     try {
-        const { name, rollNumber, email, password, program, degree, department } = req.body;
+        const { name, rollNumber, email, password, program, degree, department, regulation, branch } = req.body;
 
         if (!name || !rollNumber || !password) {
             return res.status(400).json({ message: "Name, roll number, and password are required" });
@@ -125,7 +125,21 @@ export const createStudentAccount = async (req, res) => {
         // Check if student already exists
         const existingStudent = await User.findOne({ username: normalizedRoll });
         if (existingStudent) {
-            return res.status(400).json({ message: "Student account already exists for this roll number." });
+            existingStudent.name = name;
+            if (email !== undefined) existingStudent.email = email;
+            if (program) existingStudent.program = program;
+            if (degree) existingStudent.degree = degree;
+            if (department) existingStudent.department = department;
+            if (regulation) existingStudent.regulation = regulation;
+            if (branch) existingStudent.branch = branch;
+
+            await existingStudent.save();
+
+            return res.status(200).json({
+                message: `Register Number ${normalizedRoll} already existed. The record has been updated with the new details.`,
+                student: { name: existingStudent.name, username: existingStudent.username, email: existingStudent.email },
+                isUpdated: true
+            });
         }
 
         // Hash password
@@ -140,7 +154,9 @@ export const createStudentAccount = async (req, res) => {
             role: "student",
             program,
             degree,
-            department
+            department,
+            regulation,
+            branch
         });
 
         // Send Email with Credentials
@@ -181,7 +197,12 @@ export const changeStudentPassword = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        const student = await User.findOne({ username, role: "student" });
+        const normalizedUsername = String(username).trim().toUpperCase();
+        if (req.user?.role !== 'admin' && req.user?.username?.toUpperCase() !== normalizedUsername) {
+            return res.status(403).json({ message: "You can only change your own password." });
+        }
+
+        const student = await User.findOne({ username: normalizedUsername, role: "student" });
         if (!student) {
             return res.status(404).json({ message: "Student account not found." });
         }
@@ -212,7 +233,7 @@ export const changeStudentPassword = async (req, res) => {
  */
 export const getAllStudents = async (req, res) => {
     try {
-        const students = await User.find({ role: "student" }).select('-password -plainPassword');
+        const students = await User.find({ role: "student" }).select('-password -plainPassword').sort({ username: 1 });
         res.json(students);
     } catch (err) {
         console.error("Error fetching students:", err);
@@ -227,7 +248,7 @@ export const getAllStudents = async (req, res) => {
 export const updateStudentAccount = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, rollNumber, email, skipEmail, program, degree, department } = req.body;
+        const { name, rollNumber, email, skipEmail, program, degree, department, regulation, branch } = req.body;
 
         const student = await User.findById(id);
         if (!student || student.role !== "student") {
@@ -240,6 +261,8 @@ export const updateStudentAccount = async (req, res) => {
         if (program !== undefined) student.program = program;
         if (degree !== undefined) student.degree = degree;
         if (department !== undefined) student.department = department;
+        if (regulation !== undefined) student.regulation = regulation;
+        if (branch !== undefined) student.branch = branch;
 
         await student.save();
 
@@ -264,7 +287,9 @@ export const updateStudentAccount = async (req, res) => {
             email: student.email,
             program: student.program,
             degree: student.degree,
-            department: student.department
+            department: student.department,
+            regulation: student.regulation,
+            branch: student.branch
         };
         res.json({ message: "Student updated successfully", student: studentResponse });
     } catch (err) {
@@ -285,6 +310,7 @@ export const bulkCreateStudents = async (req, res) => {
         }
 
         const createdStudents = [];
+        const updatedStudents = [];
         const skippedStudents = [];
         
         const salt = await bcrypt.genSalt(10);
@@ -294,11 +320,25 @@ export const bulkCreateStudents = async (req, res) => {
                 const normalizedRoll = input.rollNumber.trim().toUpperCase();
                 const existing = await User.findOne({ username: normalizedRoll });
                 if (existing) {
-                    skippedStudents.push({ ...input, reason: "Roll number already exists" });
+                    existing.name = input.name || existing.name;
+                    if (input.email !== undefined) existing.email = input.email;
+                    if (input.program) existing.program = input.program;
+                    if (input.degree) existing.degree = input.degree;
+                    if (input.department) existing.department = input.department;
+                    if (input.regulation) existing.regulation = input.regulation;
+                    if (input.branch) existing.branch = input.branch;
+
+                    await existing.save();
+
+                    updatedStudents.push({ 
+                        rollNumber: normalizedRoll, 
+                        name: input.name, 
+                        reason: "Register number already existed — updated with newly uploaded data" 
+                    });
                     continue;
                 }
                 
-                const hashedPassword = await bcrypt.hash(input.password, salt);
+                const hashedPassword = await bcrypt.hash(input.password || "student123", salt);
                 
                 const student = await User.create({
                     name: input.name,
@@ -308,7 +348,9 @@ export const bulkCreateStudents = async (req, res) => {
                     role: "student",
                     program: input.program,
                     degree: input.degree,
-                    department: input.department
+                    department: input.department,
+                    regulation: input.regulation,
+                    branch: input.branch
                 });
 
                 createdStudents.push(student);
@@ -319,11 +361,11 @@ export const bulkCreateStudents = async (req, res) => {
                             from: `"Exam Cell" <${process.env.EMAIL_USER}>`,
                             to: input.email,
                             subject: 'Your Exam Hall Planner Account Details',
-                            text: `Hello ${input.name},\n\nYour exam portal account has been created!\n\nUsername: ${input.rollNumber}\nPassword: ${input.password}\n\nThis is your auto-generated unique password. Once you log in, you can create or change your own password in the settings.\nRecommendation: If you put your date of birth as your password, it would be fine enough to remember.\n\nPlease login to check your seating plan.\n\nThanks,\nExamination Cell\nSRM MCET`
+                            text: `Hello ${input.name},\n\nYour exam portal account has been created!\n\nUsername: ${input.rollNumber}\nPassword: ${input.password || 'student123'}\n\nThis is your auto-generated unique password. Once you log in, you can create or change your own password in the settings.\nRecommendation: If you put your date of birth as your password, it would be fine enough to remember.\n\nPlease login to check your seating plan.\n\nThanks,\nExamination Cell\nSRM MCET`
                         };
                         await transporter.sendMail(mailOptions);
                     } catch (mailError) {
-                        console.error("Failed to send bulk email to ${input.email}:", mailError);
+                        console.error(`Failed to send bulk email to ${input.email}:`, mailError);
                     }
                 }
             } catch (err) {
@@ -331,11 +373,13 @@ export const bulkCreateStudents = async (req, res) => {
             }
         }
 
-        res.status(201).json({
-            message: `Successfully created ${createdStudents.length} students. Skipped ${skippedStudents.length}.`,
+        res.status(200).json({
+            message: `Processed ${students.length} students: ${createdStudents.length} created, ${updatedStudents.length} updated.`,
             createdCount: createdStudents.length,
+            updatedCount: updatedStudents.length,
             skippedCount: skippedStudents.length,
-            skippedDetailed: skippedStudents
+            skippedDetailed: skippedStudents,
+            updatedDetailed: updatedStudents
         });
 
     } catch (err) {

@@ -481,3 +481,122 @@ export const bulkCreateHalls = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+/* ===============================
+   DIVIDE DRAWING HALL (DH -> DHA & DHB)
+================================ */
+export const divideHall = async (req, res) => {
+  try {
+    const { id } = req.body;
+    const hall = await Hall.findById(id);
+    if (!hall) {
+      return res.status(404).json({ message: "Hall not found" });
+    }
+
+    const upperName = hall.name.toUpperCase();
+    if (!upperName.includes("DH")) {
+      return res.status(400).json({ message: "Only Drawing Halls (DH) can be divided." });
+    }
+
+    // Rule: Cannot divide more than once (e.g. DH1A or DH1B cannot be divided further)
+    if (upperName.endsWith("A") || upperName.endsWith("B")) {
+      return res.status(400).json({ message: `Drawing Hall ${hall.name} has already been divided into section A/B and cannot be divided further.` });
+    }
+
+    if (hall.rows < 2) {
+      return res.status(400).json({ message: "Hall must have at least 2 rows to be divided." });
+    }
+
+    const halfRows = Math.floor(hall.rows / 2);
+    const remRows = hall.rows - halfRows;
+
+    const nameA = `${hall.name}A`;
+    const nameB = `${hall.name}B`;
+
+    // Check if sub-halls already exist
+    const existsA = await Hall.findOne({ name: nameA });
+    const existsB = await Hall.findOne({ name: nameB });
+    if (existsA || existsB) {
+      return res.status(400).json({ message: `Divided sub-hall (${nameA} or ${nameB}) already exists.` });
+    }
+
+    const hallA = await Hall.create({
+      name: nameA,
+      rows: halfRows || 1,
+      columns: hall.columns,
+      seatsPerBench: 1,
+      floor: hall.floor,
+      facultyRequired: 1
+    });
+
+    const hallB = await Hall.create({
+      name: nameB,
+      rows: remRows,
+      columns: hall.columns,
+      seatsPerBench: 1,
+      floor: hall.floor,
+      facultyRequired: 1
+    });
+
+    // Remove original hall
+    await Hall.findByIdAndDelete(id);
+
+    res.json({
+      success: true,
+      message: `Drawing Hall ${hall.name} divided into ${nameA} and ${nameB}.`,
+      halls: [hallA, hallB]
+    });
+  } catch (error) {
+    console.error("Divide hall error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/* ===============================
+   MERGE DRAWING HALLS (DHA + DHB -> DH)
+================================ */
+export const mergeHalls = async (req, res) => {
+  try {
+    const { baseName } = req.body; // e.g. "DH1" or "DH"
+    if (!baseName) {
+      return res.status(400).json({ message: "Base hall name is required." });
+    }
+
+    const nameA = `${baseName}A`;
+    const nameB = `${baseName}B`;
+
+    const hallA = await Hall.findOne({ name: nameA });
+    const hallB = await Hall.findOne({ name: nameB });
+
+    if (!hallA || !hallB) {
+      return res.status(400).json({ message: `Both ${nameA} and ${nameB} must exist to reconnect into ${baseName}.` });
+    }
+
+    const combinedRows = hallA.rows + hallB.rows;
+    const columns = hallA.columns;
+    const floor = hallA.floor;
+
+    // Remove A & B
+    await Hall.findByIdAndDelete(hallA._id);
+    await Hall.findByIdAndDelete(hallB._id);
+
+    // Create merged hall
+    const mergedHall = await Hall.create({
+      name: baseName,
+      rows: combinedRows,
+      columns: columns,
+      seatsPerBench: 1,
+      floor: floor,
+      facultyRequired: 1
+    });
+
+    res.json({
+      success: true,
+      message: `Drawing Halls ${nameA} and ${nameB} reconnected into ${baseName}.`,
+      hall: mergedHall
+    });
+  } catch (error) {
+    console.error("Merge halls error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};

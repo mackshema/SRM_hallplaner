@@ -18,7 +18,7 @@ type StudentSeat = {
     column: number;
     benchPosition: number;
     rollNumber: string;
-    departmentId?: number;
+    departmentId?: string | number;
     departmentName?: string;
 };
 
@@ -513,16 +513,14 @@ export const exportBenchLayoutWordDoc = async ({
                     new Paragraph({ text: "" }), // Spacer
                     summaryTable,
                     new Paragraph({
-                        text: "BLACK BOARD",
-                        bold: true,
+                        children: [new TextRun({ text: "BLACK BOARD", bold: true })],
                         alignment: AlignmentType.CENTER,
                         spacing: { before: 200, after: 200 }
                     }),
                     seatingGridTable,
 
                     new Paragraph({
-                        text: "* It should be filled carefully by Invigilators. Encircle the Absentees.",
-                        italics: true,
+                        children: [new TextRun({ text: "* It should be filled carefully by Invigilators. Encircle the Absentees.", italics: true })],
                         spacing: { before: 300 },
                     }),
 

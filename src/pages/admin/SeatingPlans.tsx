@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,10 +16,11 @@ import { Button } from "@/components/ui/button";
 
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CheckCircle2, View, Eye, EyeOff, X } from "lucide-react";
+import { CheckCircle2, View, Eye, EyeOff, X, Loader2 } from "lucide-react";
 
 import { db, Hall, ExamSession } from "@/lib/db";
 import { useToast } from "@/hooks/use-toast";
+import { downloadFromApi } from "@/lib/download";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,6 +69,19 @@ const SeatingPlans = () => {
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [selectedSessionAssignments, setSelectedSessionAssignments] = useState<any[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Follow ?sessionId= changes made after mount (e.g. browser back/forward).
+  // The initial load is handled by the mount effect below.
+  const sessionIdParam = searchParams.get("sessionId");
+  const prevSessionIdParam = React.useRef(sessionIdParam);
+  useEffect(() => {
+    if (sessionIdParam === prevSessionIdParam.current) return;
+    prevSessionIdParam.current = sessionIdParam;
+    if (!sessionIdParam || sessionIdParam === selectedSessionId) return;
+    setSelectedSessionId(sessionIdParam);
+    db.getAllSeatAssignments(sessionIdParam).then(setSelectedSessionAssignments).catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionIdParam]);
 
   const fetchSeatingPlan = async (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -191,7 +206,7 @@ const SeatingPlans = () => {
           setSelectedSessionAssignments(assignments);
         }
 
-        const settingsRes = await fetch("http://localhost:5000/api/settings");
+        const settingsRes = await fetch(`${API_URL}/settings`);
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
@@ -208,7 +223,6 @@ const SeatingPlans = () => {
     if (!timetableFile) return;
     const formData = new FormData();
     formData.append("file", timetableFile);
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
     try {
       const res = await fetch(`${API_URL}/internal-timetable/upload-timetable`, {
         method: "POST",
@@ -292,6 +306,25 @@ const SeatingPlans = () => {
       return;
     }
     navigate(`/admin/seating-plans/${hallId}?examSessionId=${selectedSessionId}`);
+  };
+
+  // "all" = zip of every hall's bench layout; otherwise the hall id being downloaded.
+  const [downloadingLayout, setDownloadingLayout] = useState<string | null>(null);
+
+  const downloadHallLayout = async (hallId?: string, hallName?: string) => {
+    if (!selectedSessionId) return;
+    setDownloadingLayout(hallId || "all");
+    try {
+      if (hallId) {
+        await downloadFromApi(`${API_URL}/export/hall-layouts/${selectedSessionId}/${hallId}`, `${hallName || "Hall"}_Bench_Layout.docx`);
+      } else {
+        await downloadFromApi(`${API_URL}/export/hall-layouts/${selectedSessionId}`, "Hall_Layouts.zip");
+      }
+    } catch (e) {
+      toast({ title: "Download Error", description: e instanceof Error ? e.message : "Failed to download hall layout", variant: "destructive" });
+    } finally {
+      setDownloadingLayout(null);
+    }
   };
 
   const handleSkipRollNumbers = () => {
@@ -383,7 +416,6 @@ const SeatingPlans = () => {
   const handleBulkTimetableGeneration = async () => {
     setGenerating(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       const res = await fetch(`${API_URL}/internal-timetable/generate-all-seating`, {
          method: 'POST',
          headers: {
@@ -766,7 +798,11 @@ const SeatingPlans = () => {
                    <Button onClick={exportConsolidatedPlan} className="bg-primary text-primary-foreground shadow-sm">
                      Download Consolidated
                    </Button>
-                   <Button onClick={() => window.open(`http://localhost:5000/api/export/full-exam/${selectedSessionId}`, '_blank')} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
+                   <Button variant="outline" onClick={() => downloadHallLayout()} disabled={downloadingLayout !== null || occupiedHalls.length === 0}>
+                     {downloadingLayout === "all" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                     All Hall Layouts (.zip)
+                   </Button>
+                   <Button onClick={() => downloadFromApi(`${API_URL}/export/full-exam/${selectedSessionId}`, 'Full_Exam_Package.zip').catch((e) => toast({ title: "Download Error", description: e.message, variant: "destructive" }))} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
                      Download Full Package (Docx + Pdf)
                    </Button>
                  </div>
@@ -883,9 +919,15 @@ const SeatingPlans = () => {
                                  </TableCell>
                                  <TableCell className="text-slate-500 text-sm">{hall.rows} rows × {hall.columns} cols</TableCell>
                                  <TableCell className="text-right">
-                                   <Button variant="outline" size="sm" onClick={() => handleViewHall(hall._id)}>
-                                     <View className="h-4 w-4 mr-2" /> View &amp; Configure Hall
-                                   </Button>
+                                   <div className="flex justify-end gap-2">
+                                     <Button variant="outline" size="sm" onClick={() => downloadHallLayout(hall._id, hall.name)} disabled={downloadingLayout !== null}>
+                                       {downloadingLayout === hall._id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                                       Layout (.docx)
+                                     </Button>
+                                     <Button variant="outline" size="sm" onClick={() => handleViewHall(hall._id)}>
+                                       <View className="h-4 w-4 mr-2" /> View &amp; Configure Hall
+                                     </Button>
+                                   </div>
                                  </TableCell>
                                </TableRow>
                              ))}
@@ -965,30 +1007,52 @@ const SeatingPlans = () => {
               </ul>
             </div>
 
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-800">Alternative Way 1: Force Assign Available Faculty (Demand Override)</p>
+              {facultySuggestions.length > 0 && (
+                <Button 
+                  type="button"
+                  variant="outline" 
+                  size="sm" 
+                  className="h-7 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
+                  onClick={() => {
+                    const allIds = facultySuggestions.map(f => String(f.id));
+                    setTempDemandFacultyIds(allIds);
+                  }}
+                >
+                  Select All ({facultySuggestions.length})
+                </Button>
+              )}
+            </div>
+
             <div>
-              <p className="text-sm font-bold mb-2">Available Faculty for Force Assignment (Demand):</p>
-              <div className="max-h-60 overflow-y-auto border rounded-md p-2 grid grid-cols-2 gap-2">
+              <div className="max-h-52 overflow-y-auto border rounded-md p-2 grid grid-cols-2 gap-2 bg-slate-50/50">
                 {facultySuggestions.map((f) => (
-                  <div key={f.id} className="flex items-center gap-2 border p-2 rounded hover:bg-gray-50">
+                  <div key={f.id} className="flex items-center gap-2 border p-2 rounded bg-white hover:bg-orange-50/40 transition-colors">
                     <input
                       type="checkbox"
                       id={`suggest-${f.id}`}
-                      checked={tempDemandFacultyIds.includes(f.id)}
-                      onChange={() => toggleDemandFaculty(f.id)}
+                      checked={tempDemandFacultyIds.includes(String(f.id))}
+                      onChange={() => toggleDemandFaculty(String(f.id))}
+                      className="h-4 w-4 text-orange-600 rounded"
                     />
-                    <label htmlFor={`suggest-${f.id}`} className="text-xs cursor-pointer">
-                      <span className="font-semibold block">{f.name}</span>
-                      <span className="text-gray-500">{f.department}</span>
+                    <label htmlFor={`suggest-${f.id}`} className="text-xs cursor-pointer flex-1">
+                      <span className="font-semibold block text-slate-800">{f.name}</span>
+                      <span className="text-slate-500">{f.department}</span>
                     </label>
                   </div>
                 ))}
-                {facultySuggestions.length === 0 && <p className="text-sm italic text-gray-500 col-span-2 text-center py-4">No other available faculty found. Please add new faculty in the Faculty tab.</p>}
+                {facultySuggestions.length === 0 && (
+                  <p className="text-sm italic text-gray-500 col-span-2 text-center py-4">
+                    No other unassigned faculty found. Please use Alternative Way 2 below to add new faculty.
+                  </p>
+                )}
               </div>
             </div>
 
             {/* Instant Faculty Creation Form */}
-            <div className="border-t pt-4">
-              <p className="text-sm font-bold mb-2 text-slate-800">Instantly Add New Faculty Member:</p>
+            <div className="border-t pt-3">
+              <p className="text-sm font-bold mb-2 text-slate-800">Alternative Way 2: Instantly Register & Assign New Faculty</p>
               <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
                 <div>
                   <Label htmlFor="inst-name" className="text-xs text-slate-600">Full Name (Format: R. Kumar)</Label>
@@ -997,7 +1061,7 @@ const SeatingPlans = () => {
                     placeholder="e.g. R. Kumar" 
                     value={newFacultyForm.name} 
                     onChange={e => setNewFacultyForm(prev => ({ ...prev, name: e.target.value }))}
-                    className="h-8 text-xs mt-1"
+                    className="h-8 text-xs mt-1 bg-white"
                   />
                 </div>
                 <div>
@@ -1007,7 +1071,7 @@ const SeatingPlans = () => {
                     placeholder="e.g. fac_rkumar" 
                     value={newFacultyForm.username} 
                     onChange={e => setNewFacultyForm(prev => ({ ...prev, username: e.target.value }))}
-                    className="h-8 text-xs mt-1"
+                    className="h-8 text-xs mt-1 bg-white"
                   />
                 </div>
                 <div className="flex items-end gap-2">
@@ -1018,25 +1082,25 @@ const SeatingPlans = () => {
                       placeholder="e.g. CSE" 
                       value={newFacultyForm.department} 
                       onChange={e => setNewFacultyForm(prev => ({ ...prev, department: e.target.value }))}
-                      className="h-8 text-xs mt-1"
+                      className="h-8 text-xs mt-1 bg-white"
                     />
                   </div>
                   <Button 
                     size="sm" 
                     onClick={handleInstantCreateFaculty} 
                     disabled={creatingInstantFaculty}
-                    className="h-8 text-xs bg-slate-800 hover:bg-slate-900 text-white"
+                    className="h-8 text-xs bg-slate-800 hover:bg-slate-900 text-white font-medium"
                   >
-                    {creatingInstantFaculty ? "Adding..." : "Add"}
+                    {creatingInstantFaculty ? "Adding..." : "Add & Demand"}
                   </Button>
                 </div>
               </div>
             </div>
           </div>
 
-          <AlertDialogFooter>
-            <Button variant="ghost" onClick={() => setShowShortageDialog(false)}>Ignore & Keep Current</Button>
-            <Button onClick={handleApplyDemand} className="bg-orange-600 hover:bg-orange-700 text-white">
+          <AlertDialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowShortageDialog(false)}>Ignore & Keep Current</Button>
+            <Button onClick={handleApplyDemand} className="bg-orange-600 hover:bg-orange-700 text-white font-medium">
               Confirm & Re-run (Apply Demand)
             </Button>
           </AlertDialogFooter>

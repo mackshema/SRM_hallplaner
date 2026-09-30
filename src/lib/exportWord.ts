@@ -184,7 +184,7 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
                 children: [
                   new Paragraph({
                     text: title.split('\n')[0] || "",
-                    heading: HeadingLevel.HEADING1,
+                    heading: HeadingLevel.HEADING_1,
                     alignment: AlignmentType.CENTER,
                   }),
                   institutionSubtitle ? new Paragraph({
@@ -228,7 +228,7 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
       children.push(
         new Paragraph({
           text: line,
-          heading: HeadingLevel.HEADING2,
+          heading: HeadingLevel.HEADING_2,
           alignment: AlignmentType.CENTER,
           spacing: { after: 100 },
         })
@@ -241,7 +241,7 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
       children.push(
         new Paragraph({
           text: line,
-          heading: HeadingLevel.HEADING1,
+          heading: HeadingLevel.HEADING_1,
           alignment: AlignmentType.CENTER,
           spacing: { after: 100 },
         })

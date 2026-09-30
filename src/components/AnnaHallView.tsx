@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { Hall } from "@/lib/db";
 
 interface AnnaHallViewProps {
@@ -11,7 +12,7 @@ const AnnaHallView = ({ hallId, assignments, facultyNames }: AnnaHallViewProps) 
   const [hall, setHall] = useState<Hall | null>(null);
 
   useEffect(() => {
-    fetch(`http://localhost:5000/api/halls/${hallId}`)
+    fetch(`${API_URL}/halls/${hallId}`)
       .then(res => res.json())
       .then(data => setHall(data))
       .catch(console.error);

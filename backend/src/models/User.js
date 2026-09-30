@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema(
     facultyEmail: { type: String },
     hodEmail: { type: String },
     // New Generation Fields for Faculty
-    isSelectedForGeneration: { type: Boolean, default: false },
+    isSelectedForGeneration: { type: Boolean, default: true },
     weeklyDutyCount: { type: Number, default: 0 },
     lastDutyDate: { type: Date },
 
@@ -34,7 +34,9 @@ const userSchema = new mongoose.Schema(
     degree: {
       type: String,
       required: function() { return this.role === 'student'; }
-    } // For grouping students by Year/Degree
+    }, // For grouping students by Year/Degree
+    regulation: { type: String }, // e.g. '2021', '2025'
+    branch: { type: String } // e.g. '104 - B.E. Computer Science and Engineering'
   },
   { timestamps: true }
 );

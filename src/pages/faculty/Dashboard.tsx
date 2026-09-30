@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,7 +81,7 @@ const FacultyDashboard = () => {
 
         // Fetch Delegation Requests
         try {
-          const reqRes = await fetch(`http://localhost:5000/api/delegation/requests/${fId}`);
+          const reqRes = await fetch(`${API_URL}/delegation/requests/${fId}`);
           if (reqRes.ok) {
             const reqs = await reqRes.json();
             setDelegationRequests(reqs);
@@ -91,7 +92,7 @@ const FacultyDashboard = () => {
 
         // Fetch all faculty for dropdown
         try {
-          const facultiesRes = await fetch("http://localhost:5000/api/users");
+          const facultiesRes = await fetch(`${API_URL}/users`);
           if (facultiesRes.ok) {
             const facultiesData = await facultiesRes.json();
             setAllFaculty(facultiesData.filter((f: User) => f.role === 'faculty' && f._id !== fId));
@@ -163,7 +164,7 @@ const FacultyDashboard = () => {
         reason: delegationForm.reason
       };
 
-      const res = await fetch("http://localhost:5000/api/delegation/request", {
+      const res = await fetch(`${API_URL}/delegation/request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

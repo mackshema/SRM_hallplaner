@@ -5,8 +5,12 @@ import bcrypt from "bcryptjs";
 // @route   GET /api/users
 export const getUsers = async (req, res) => {
     try {
+        // Auto-heal: Ensure all faculty have isSelectedForGeneration set to true if unset or false
+        await User.updateMany(
+            { role: 'faculty', $or: [{ isSelectedForGeneration: false }, { isSelectedForGeneration: { $exists: false } }] },
+            { $set: { isSelectedForGeneration: true } }
+        );
         const users = await User.find({}).select('-password -plainPassword');
-        // Map _id to id for frontend compatibility if needed, though frontend now handles _id
         res.json(users);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -53,7 +57,8 @@ export const createUser = async (req, res) => {
             department,
             designation,
             facultyEmail,
-            hodEmail
+            hodEmail,
+            isSelectedForGeneration: true
         });
 
         if (user) {
@@ -72,6 +77,10 @@ export const createUser = async (req, res) => {
             res.status(400).json({ message: "Invalid user data" });
         }
     } catch (error) {
+        // Bad input (e.g. a designation outside the allowed list) is the caller's error, not the server's
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ message: Object.values(error.errors).map(e => e.message).join(', ') });
+        }
         res.status(500).json({ message: error.message });
     }
 };
