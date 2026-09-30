@@ -24,14 +24,13 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Calendar, Clock, Building2, CheckCircle2, UserCheck, Users } from "lucide-react";
 
-const generateGoogleCalendarUrl = (examDate: string) => {
+const generateGoogleCalendarUrl = (examDate: string, examTime?: string, hallName?: string) => {
   if (!examDate) return "#";
   const dateStr = examDate.replace(/-/g, "");
-  // Assume all-day event
-  const details = encodeURIComponent("Exam Duty assigned by Examination Cell.");
-  const title = encodeURIComponent("Exam Duty");
-  // Google Calendar format: YYYYMMDD/YYYYMMDD
+  const details = encodeURIComponent(`Exam Invigilator Duty at ${hallName || 'Assigned Hall'}. Time Slot: ${examTime || 'Standard Exam Timing'}`);
+  const title = encodeURIComponent(`Exam Duty - ${hallName || 'Hall'}`);
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dateStr}/${dateStr}&details=${details}`;
 };
 
@@ -221,39 +220,103 @@ const FacultyDashboard = () => {
           <p>Loading your assigned duties...</p>
         ) : assignedHalls.length > 0 ? (
           assignedHalls.map((hall, index) => (
-            <Card key={`${hall._id}-${index}`} className="mb-4">
-              <CardHeader>
-                <CardTitle>Exam Duty</CardTitle>
-                <CardDescription>
-                  Details will be communicated by the Examination Cell
-                </CardDescription>
+            <Card key={`${hall._id}-${index}`} className="mb-4 shadow-sm border-slate-200">
+              <CardHeader className="bg-slate-50/50 pb-3 border-b">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2 text-slate-900">
+                      <Building2 className="h-5 w-5 text-blue-600" />
+                      {hall.name ? `Hall: ${hall.name}` : "Assigned Hall Duty"}
+                      {hall.floor && (
+                        <Badge variant="outline" className="text-xs font-normal ml-2">
+                          {hall.floor}
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-500 mt-1">
+                      Exam duty assigned from official timetable & seating roster
+                    </CardDescription>
+                  </div>
+                  <Badge className="w-fit bg-blue-100 text-blue-800 border-blue-200 font-semibold px-3 py-1">
+                    {hall.examSession ? `${hall.examSession} Session` : "FN Session"}
+                  </Badge>
+                </div>
               </CardHeader>
 
-              <CardContent className="space-y-2">
-                <p>
-                  <strong>Exam Date:</strong>{" "}
-                  {hall.examDate || "Not assigned"}
-                </p>
+              <CardContent className="pt-4 space-y-4">
+                {/* Exam Date & Time Section */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-blue-50/50 p-3 rounded-lg border border-blue-100 text-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-100 p-2 rounded-full text-blue-600">
+                      <Calendar className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Exam Date</p>
+                      <p className="font-semibold text-slate-900">{hall.examDate || "Not assigned"}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-100 p-2 rounded-full text-blue-600">
+                      <Clock className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Timetable Slot / Time</p>
+                      <p className="font-semibold text-slate-900">
+                        {hall.examTime || (hall.examSession === "AN" ? "01:30 PM - 04:30 PM" : "09:30 AM - 12:30 PM")}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Core Workflow Process Status */}
+                <div className="pt-2 border-t border-slate-100">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    Core Process Pipeline Status
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                    <div className="flex items-center gap-1.5 p-2 rounded bg-emerald-50 text-emerald-700 font-medium">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>Timetable Uploaded</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 p-2 rounded bg-emerald-50 text-emerald-700 font-medium">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>Plan Generated</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 p-2 rounded bg-emerald-50 text-emerald-700 font-medium">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>Hall Allocated</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 p-2 rounded bg-emerald-50 text-emerald-700 font-medium">
+                      <UserCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>Faculty Assigned</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 p-2 rounded bg-emerald-50 text-emerald-700 font-medium col-span-2 sm:col-span-1">
+                      <Users className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>Students Seated</span>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
 
-              <CardFooter className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                <p className="text-sm text-gray-500 text-center sm:text-left">
-                  Hall and Seating arrangement are managed by the Examination Cell.
+              <CardFooter className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-3 border-t bg-slate-50/30">
+                <p className="text-xs text-slate-500 text-center sm:text-left">
+                  Official duty assignment synchronized with Examination Cell timetable.
                 </p>
                 <div className="flex gap-2 w-full sm:w-auto">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => openDelegationModal(hall)}
-                    className="text-red-500 border-red-200 hover:bg-red-50 flex-1 sm:flex-none"
+                    className="text-red-500 border-red-200 hover:bg-red-50 flex-1 sm:flex-none text-xs"
                   >
                     Request Emergency Delegation
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => window.open(generateGoogleCalendarUrl(hall.examDate || ""), "_blank", "noopener,noreferrer")}
-                    className="gap-2 flex-1 sm:flex-none"
+                    onClick={() => window.open(generateGoogleCalendarUrl(hall.examDate || "", hall.examTime, hall.name), "_blank", "noopener,noreferrer")}
+                    className="gap-2 flex-1 sm:flex-none text-xs"
                   >
                     📅 Add to Calendar
                   </Button>
