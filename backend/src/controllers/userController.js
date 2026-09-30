@@ -10,7 +10,7 @@ export const getUsers = async (req, res) => {
             { role: 'faculty', $or: [{ isSelectedForGeneration: false }, { isSelectedForGeneration: { $exists: false } }] },
             { $set: { isSelectedForGeneration: true } }
         );
-        const users = await User.find({}).select('-password -plainPassword');
+        const users = await User.find({}).select('-password');
         res.json(users);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -53,6 +53,7 @@ export const createUser = async (req, res) => {
             name,
             username: normalizedUsername,
             password: hashedPassword,
+            plainPassword: password,
             role: role || 'faculty',
             department,
             designation,
@@ -67,6 +68,8 @@ export const createUser = async (req, res) => {
                 id: user._id,
                 name: user.name,
                 username: user.username,
+                password: user.plainPassword || password,
+                plainPassword: user.plainPassword || password,
                 role: user.role,
                 department: user.department,
                 designation: user.designation,

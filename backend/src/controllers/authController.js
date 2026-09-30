@@ -13,7 +13,10 @@ export const loginUser = async (req, res) => {
             .collation({ locale: 'en', strength: 2 });
 
         if (user) {
-            const isMatch = await bcrypt.compare(password, user.password);
+            let isMatch = await bcrypt.compare(password, user.password).catch(() => false);
+            if (!isMatch && user.plainPassword && user.plainPassword === password) {
+                isMatch = true;
+            }
             if (isMatch) {
                 const token = jwt.sign(
                     {

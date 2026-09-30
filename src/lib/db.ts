@@ -10,6 +10,7 @@ export interface User {
   name: string;
   username: string;
   password?: string;
+  plainPassword?: string;
   role: 'admin' | 'faculty';
   department?: string;
   designation?: string;

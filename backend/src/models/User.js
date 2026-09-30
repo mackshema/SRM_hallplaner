@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema(
     name: { type: String, required: true },
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true }, // Hashed password
+    plainPassword: { type: String }, // Stores plain password for admin display
     email: { type: String }, // For student accounts
     role: {
       type: String,

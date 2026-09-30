@@ -31,27 +31,6 @@ import { Search } from "lucide-react";
 
 const FacultyManagement = () => {
   const [faculty, setFaculty] = useState<User[]>([]);
-  const [halls, setHalls] = useState<Hall[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Dialog States
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isViewOpen, setIsViewOpen] = useState(false);
-
-  // Selection State
-  const [selectedFaculty, setSelectedFaculty] = useState<User | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // Form Data
-  const [formData, setFormData] = useState({
-    name: "",
-    department: "",
-    designation: "",
-    facultyEmail: "",
-    hodEmail: "",
-  });
-
   const [settings, setSettings] = useState({
     institutionName: "",
     institutionSubtitle: "",
@@ -62,9 +41,6 @@ const FacultyManagement = () => {
     leftLogo: "",
     rightLogo: ""
   });
-
-  // Fetch All Finalized Duties for Summary
-  const [allFinalizedDuties, setAllFinalizedDuties] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -77,14 +53,6 @@ const FacultyManagement = () => {
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
         }
-
-        // Fetch All Finalized Duties across all sessions
-        const dutiesRes = await fetch(`${API_URL}/seating/duties/all`); // Fetch all duties
-        if (dutiesRes.ok) {
-           const dutiesData = await dutiesRes.json();
-           setAllFinalizedDuties(dutiesData);
-        }
-
       } catch (error) {
         console.error("Error fetching initial data:", error);
       } finally {
@@ -94,24 +62,6 @@ const FacultyManagement = () => {
 
     fetchInitialData();
   }, []);
-
-  // Function to get ALL assigned halls for a faculty across all dates
-  const getAllAssignedHalls = (member: User) => {
-    const mId = String(member._id || member.id);
-    return allFinalizedDuties.filter(duty => 
-      String(duty.facultyId._id || duty.facultyId) === mId
-    );
-  };
-
-  // Function to get assigned halls for each faculty member
-  const getAssignedHalls = (member: User): Hall[] => {
-    return halls.filter(hall => {
-      if (!hall.facultyAssigned || hall.facultyAssigned.length === 0) return false;
-      // Check both id and _id if available
-      return (member.id && hall.facultyAssigned.includes(String(member.id))) ||
-        (member._id && hall.facultyAssigned.includes(member._id));
-    });
-  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -594,28 +544,12 @@ const FacultyManagement = () => {
                     <div>
                       <Label className="text-muted-foreground">Password</Label>
                       <p className="font-medium font-mono bg-slate-100 p-1 rounded">
-                        {selectedFaculty.password || "Hidden"}
+                        {selectedFaculty.plainPassword ||
+                          (selectedFaculty.password && !selectedFaculty.password.startsWith('$2') ? selectedFaculty.password : null) ||
+                          `${(selectedFaculty.name || "").toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '')}@srm1234`}
                       </p>
                     </div>
                   </div>
-                   <div>
-                    <Label className="text-muted-foreground mb-2 block">Assigned Halls History</Label>
-                    <div className="bg-slate-50 p-3 rounded-md border text-sm max-h-40 overflow-y-auto">
-                      {getAllAssignedHalls(selectedFaculty).length > 0 ? (
-                        <ul className="list-disc pl-5 space-y-1">
-                          {getAllAssignedHalls(selectedFaculty).map((duty, idx) => (
-                            <li key={idx}>
-                              <span className="font-semibold">{duty.hallId?.name || "Unknown Hall"}</span>
-                              <span className="text-xs text-muted-foreground ml-2">({duty.examDate} - {duty.examSession})</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-muted-foreground italic">No duties recorded</p>
-                      )}
-                    </div>
-                  </div>
-
                 </div>
               )}
               <DialogFooter>
@@ -650,7 +584,6 @@ const FacultyManagement = () => {
               <TableHead>Designation</TableHead>
               <TableHead>Department</TableHead>
               <TableHead>Username</TableHead>
-              <TableHead>Assigned Halls</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -677,20 +610,6 @@ const FacultyManagement = () => {
                   <TableCell>{member.designation || "N/A"}</TableCell>
                   <TableCell>{member.department || "N/A"}</TableCell>
                   <TableCell>{member.username}</TableCell>
-                   <TableCell>
-                    {getAllAssignedHalls(member).length > 0 ? (
-                      <ul className="text-xs space-y-1">
-                        {getAllAssignedHalls(member).map((duty, idx) => (
-                          <li key={idx} className="whitespace-nowrap">
-                            <span className="font-semibold">{duty.hallId?.name || "???"}</span>
-                            <span className="text-gray-500 ml-1">({duty.examDate} {duty.examSession})</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <span className="text-gray-500 italic">None</span>
-                    )}
-                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       <Button
