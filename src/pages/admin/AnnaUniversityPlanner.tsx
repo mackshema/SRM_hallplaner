@@ -14,6 +14,11 @@ import { Loader2, X, Plus, Calendar, View, CheckCircle2, Lock, Unlock, Eye, EyeO
 import * as XLSX from "xlsx";
 import AnnaHallView from "@/components/AnnaHallView";
 import ExcelUploadHelper from "@/components/ExcelUploadHelper";
+import PlanActionsBar from "@/components/PlanActionsBar";
+import PlanStatusBadge from "@/components/PlanStatusBadge";
+import VacancyDialog from "@/components/VacancyDialog";
+import FacultyPickerDialog from "@/components/FacultyPickerDialog";
+import { planApi, PlanVacancies } from "@/lib/planApi";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +39,20 @@ const AnnaUniversityPlanner = () => {
   const [examDate, setExamDate] = useState("");
   const [session, setSession] = useState("FN");
   const [seatingPlan, setSeatingPlan] = useState<any>(null);
+  // Legacy Word exports flag, vacancy prompt, manual hall pick, reserve names
+  const [legacyWord, setLegacyWord] = useState(false);
+  const [vacancyPlans, setVacancyPlans] = useState<PlanVacancies[]>([]);
+  const [showVacancyDialog, setShowVacancyDialog] = useState(false);
+  const [staffingRefresh, setStaffingRefresh] = useState(0);
+  const [pickerHall, setPickerHall] = useState<{ hallId: string; hallName: string } | null>(null);
+  const [reserveNames, setReserveNames] = useState<string[]>([]);
+  useEffect(() => { planApi.exportConfig().then(c => setLegacyWord(c.legacyWord)).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!seatingPlan?._id) { setReserveNames([]); return; }
+    planApi.reserves("anna", seatingPlan._id)
+      .then(list => setReserveNames(list.map(r => `${r.name}${r.department ? ` (${r.department})` : ""}`)))
+      .catch(() => setReserveNames([]));
+  }, [seatingPlan?._id, seatingPlan?.status]);
   
   // Timetable Data
   const [examData, setExamData] = useState<any[]>([]);
@@ -320,8 +339,11 @@ const AnnaUniversityPlanner = () => {
          toast({ title: "Bulk Generation Complete", description: `Created ${data.count} new plans. Skipped ${data.skipped} existing plans.` });
          fetchAllPlans();
 
-         // Show shortage popup if faculty couldn't be fully allocated
-         if (data.shortage && data.allocationWarnings && data.allocationWarnings.length > 0) {
+         // Halls left short by the department quota: show the vacancy prompt
+         if (data.planVacancies && data.planVacancies.length > 0) {
+           setVacancyPlans(data.planVacancies.map((p: any) => ({ ...p, planId: String(p.planId) })));
+           setShowVacancyDialog(true);
+         } else if (data.shortage && data.allocationWarnings && data.allocationWarnings.length > 0) {
            setAllocationWarnings(data.allocationWarnings);
            setFacultySuggestions(data.facultySuggestions || []);
            setTempDemandFacultyIds([]);
@@ -649,9 +671,7 @@ const AnnaUniversityPlanner = () => {
                                </h3>
                                <p className="text-sm font-medium text-slate-500">{plan.session} Session</p>
                             </div>
-                            <div className={`px-2 py-1 rounded text-xs font-bold ${plan.status === 'FINAL' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                               {plan.status || 'DRAFT'}
-                            </div>
+                            <PlanStatusBadge status={plan.status} publishAt={plan.publish_at} isPublished={plan.isPublished} />
                          </div>
                          <div className="flex items-center justify-between mt-4">
                            <span className="text-slate-500 text-sm font-medium">{plan.assignments?.length || 0} Students</span>
@@ -686,59 +706,27 @@ const AnnaUniversityPlanner = () => {
                  </div>
                  <div className="flex gap-2">
                    <Button variant="outline" onClick={() => setSeatingPlan(null)}>Back to Sessions</Button>
-                   <Button onClick={downloadConsolidatedPackage} className="bg-primary text-primary-foreground shadow-sm">
-                     Download Consolidated Plan
-                   </Button>
-                   <Button onClick={downloadLayoutsPackage} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
-                     Download Bench Layouts
-                   </Button>
+                   {legacyWord && (
+                     <>
+                       <Button variant="outline" onClick={downloadConsolidatedPackage}>
+                         Consolidated (legacy PDF)
+                       </Button>
+                       <Button variant="outline" onClick={downloadLayoutsPackage}>
+                         Bench Layouts (Word)
+                       </Button>
+                     </>
+                   )}
                  </div>
                </div>
 
-               <div className="rounded-xl border bg-blue-50/50 p-5 flex flex-wrap justify-between items-center gap-4">
-                  <div className="flex gap-8 items-center">
-                    <div>
-                      <span className="text-xs text-slate-500 font-semibold uppercase block mb-2 tracking-wider">Plan Status</span>
-                      <div className="flex items-center gap-2">
-                         {seatingPlan.status === "FINAL" ? <Lock className="h-4 w-4 text-green-600"/> : <Unlock className="h-4 w-4 text-yellow-600"/>}
-                         <span className={`px-2 py-1 rounded text-sm font-bold ${seatingPlan.status === "FINAL" ? 'bg-green-200 text-green-800' : 'bg-yellow-200 text-yellow-800'}`}>
-                           {seatingPlan.status || "DRAFT"}
-                         </span>
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-xs text-slate-500 font-semibold uppercase block mb-2 tracking-wider">Visibility</span>
-                      <div className="flex items-center gap-2">
-                         {seatingPlan.isPublished ? <Eye className="h-4 w-4 text-blue-600"/> : <EyeOff className="h-4 w-4 text-slate-400"/>}
-                         <span className={`px-2 py-1 rounded text-sm font-bold ${seatingPlan.isPublished ? 'bg-blue-200 text-blue-800' : 'bg-slate-200 text-slate-700'}`}>
-                           {seatingPlan.isPublished ? "PUBLISHED" : "HIDDEN"}
-                         </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    {seatingPlan.status !== "FINAL" ? (
-                      <Button className="bg-green-600 hover:bg-green-700 text-white shadow-sm" onClick={() => updatePlanStatus({ status: "FINAL" })}>
-                        <CheckCircle2 className="mr-2 h-4 w-4" /> Finalize Plan
-                      </Button>
-                    ) : (
-                      <>
-                        {!seatingPlan.isPublished ? (
-                          <Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm" onClick={() => updatePlanStatus({ isPublished: true })}>
-                            Publish to Dashboards
-                          </Button>
-                        ) : (
-                          <Button variant="outline" className="border-red-600 text-red-700 hover:bg-red-50" onClick={() => updatePlanStatus({ isPublished: false })}>
-                            Unpublish Plan
-                          </Button>
-                        )}
-                        <Button variant="outline" className="border-yellow-600 text-yellow-700 hover:bg-yellow-50" onClick={() => updatePlanStatus({ status: "DRAFT" })}>
-                          Unlock / Edit Plan
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
+               <PlanActionsBar
+                 planType="anna"
+                 plan={seatingPlan}
+                 refreshKey={staffingRefresh}
+                 onPlanUpdated={(updated) => { setSeatingPlan((prev: any) => ({ ...prev, ...updated })); fetchAllPlans(); }}
+                 onFinalize={() => updatePlanStatus({ status: "FINAL" })}
+                 onUnlock={() => updatePlanStatus({ status: "DRAFT" })}
+               />
 
                 <div className="border rounded-md bg-white">
                   <Tabs defaultValue="halls" className="w-full">
@@ -777,9 +765,14 @@ const AnnaUniversityPlanner = () => {
                                   {assignedNames || <span className="text-slate-400 italic">None Assigned</span>}
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  <Button variant="outline" size="sm" onClick={() => setViewingHallId(hallGroup.hallId)}>
-                                     <View className="h-4 w-4 mr-2" /> View & Configure Hall Layout
-                                  </Button>
+                                  <div className="flex justify-end gap-2">
+                                    <Button variant="outline" size="sm" onClick={() => setPickerHall({ hallId: String(hallGroup.hallId), hallName: hallGroup.hallName })}>
+                                      <Plus className="h-4 w-4 mr-1" /> Add Faculty
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => setViewingHallId(hallGroup.hallId)}>
+                                       <View className="h-4 w-4 mr-2" /> View & Configure Hall Layout
+                                    </Button>
+                                  </div>
                                 </TableCell>
                               </TableRow>
                             );
@@ -950,7 +943,8 @@ const AnnaUniversityPlanner = () => {
                {viewingHallId && seatingPlan && (
                  <AnnaHallView 
                    hallId={viewingHallId} 
-                   assignments={seatingPlan.assignments.filter((a: any) => a.hallId === viewingHallId)} 
+                   assignments={seatingPlan.assignments.filter((a: any) => a.hallId === viewingHallId)}
+                   reserveNames={reserveNames}
                    facultyNames={
                      (seatingPlan.facultyAssignments || [])
                        .find((fa: any) => fa.hallId.toString() === viewingHallId.toString())
@@ -973,7 +967,7 @@ const AnnaUniversityPlanner = () => {
               Faculty Allocation Shortage
             </AlertDialogTitle>
             <AlertDialogDescription>
-              The system could not fulfill all faculty requirements based on existing rules (e.g., max 4 duties/week, no continuous sessions).
+              The system could not fulfill all faculty requirements based on existing rules (e.g., department quota, max 4 duties/week, no continuous sessions).
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -1084,6 +1078,23 @@ const AnnaUniversityPlanner = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <VacancyDialog
+        open={showVacancyDialog}
+        onClose={() => setShowVacancyDialog(false)}
+        plans={vacancyPlans}
+        onChanged={() => { setStaffingRefresh(n => n + 1); fetchAllPlans(); if (seatingPlan) fetchSeatingPlan(); }}
+      />
+      {pickerHall && seatingPlan && (
+        <FacultyPickerDialog
+          open
+          onClose={() => setPickerHall(null)}
+          planType="anna"
+          planId={seatingPlan._id}
+          hallId={pickerHall.hallId}
+          hallName={pickerHall.hallName}
+          onAdded={() => { setStaffingRefresh(n => n + 1); fetchSeatingPlan(); }}
+        />
+      )}
     </div>
   );
 };

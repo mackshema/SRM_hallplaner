@@ -6,9 +6,11 @@ interface AnnaHallViewProps {
   hallId: string;
   assignments: any[];
   facultyNames?: string[];
+  /** Reserve faculty of the plan, listed at the bottom opposite the signature */
+  reserveNames?: string[];
 }
 
-const AnnaHallView = ({ hallId, assignments, facultyNames }: AnnaHallViewProps) => {
+const AnnaHallView = ({ hallId, assignments, facultyNames, reserveNames = [] }: AnnaHallViewProps) => {
   const [hall, setHall] = useState<Hall | null>(null);
 
   useEffect(() => {
@@ -87,6 +89,18 @@ const AnnaHallView = ({ hallId, assignments, facultyNames }: AnnaHallViewProps) 
             })}
           </React.Fragment>
         ))}
+      </div>
+
+      {/* Bottom Footer: Reserve Faculty (Left) & Superintendent Signature (Right) */}
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-8 pt-4 border-t border-slate-200 text-xs text-slate-600 bg-white p-4 rounded-xl border shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-indigo-950 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200">
+            Reserve Faculty: {reserveNames.length ? reserveNames.join(", ") : "None assigned"}
+          </span>
+        </div>
+        <div className="text-right italic font-medium text-slate-500">
+          Name & Signature of the Hall Superintendent
+        </div>
       </div>
     </div>
   );

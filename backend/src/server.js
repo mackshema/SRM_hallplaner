@@ -15,9 +15,18 @@ import studentRoutes from "./routes/studentRoutes.js";
 import exportRoutes from "./routes/exportRoutes.js";
 import delegationRoutes from "./routes/delegationRoutes.js";
 import annaUniversityRoutes from "./routes/annaUniversityRoutes.js";
+import reserveFacultyRoutes from "./routes/reserveFacultyRoutes.js";
+import dutySummaryRoutes from "./routes/dutySummaryRoutes.js";
+import examScheduleRoutes from "./routes/examScheduleRoutes.js";
+import planRoutes from "./routes/planRoutes.js";
+import facultyDutyRoutes from "./routes/facultyDutyRoutes.js";
+import absenteeRoutes from "./routes/absenteeRoutes.js";
+import exportV2Routes from "./routes/exportV2Routes.js";
+import { startPublishScheduler } from "./services/planLifecycle.js";
 
 dotenv.config();
-connectDB();
+// Migrations run inside connectDB; the publish scheduler starts once they're done
+connectDB().then(() => startPublishScheduler());
 
 // CREATE APP FIRST
 const app = express();
@@ -49,6 +58,13 @@ app.use("/api/student", studentRoutes); // Public Student Lookup
 app.use("/api/export", exportRoutes); // Zipped Document exports
 app.use("/api/delegation", delegationRoutes); // Delegation requests
 app.use("/api/anna", annaUniversityRoutes); // Anna University Module
+app.use("/api/reserve-faculty", reserveFacultyRoutes); // Reserve Faculty Module
+app.use("/api/duty-summary", dutySummaryRoutes); // Duty Summary Module
+app.use("/api/exam-schedules", examScheduleRoutes); // Exam schedules / cycles (IAT1, IAT2, Model, Anna)
+app.use("/api/plans", planRoutes); // Plan actions: publish, timing, vacancies, manual faculty picks
+app.use("/api/faculty-duties", facultyDutyRoutes); // Per-faculty exam duty history
+app.use("/api/absentees", absenteeRoutes); // Absentee upload window & report
+app.use("/api/exports", exportV2Routes); // Excel / PDF exports, bulk ZIP jobs
 
 
 //  TEST ROUTE

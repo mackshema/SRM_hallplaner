@@ -24,7 +24,36 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Clock, Building2, CheckCircle2, UserCheck, Users } from "lucide-react";
+import { Calendar, Clock, Building2, CheckCircle2, UserCheck, Users, ShieldAlert, AlertCircle, Radio, Timer, Upload, Lock } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import FacultyDutyHistory from "@/components/FacultyDutyHistory";
+import AbsenteeUploadDialog from "@/components/AbsenteeUploadDialog";
+
+const LIVE_BADGE: Record<string, { label: string; className: string }> = {
+  UPCOMING: { label: "Upcoming", className: "bg-slate-100 text-slate-700 border-slate-200" },
+  LIVE: { label: "Live", className: "bg-red-600 text-white border-red-600 animate-pulse" },
+  COMPLETED: { label: "Completed", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+};
+
+const timeIST = (iso?: string | null) =>
+  iso ? new Date(iso).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "";
+
+/** "1h 20m" / "12m" / "less than a minute" */
+const remaining = (until: string | Date, now: number) => {
+  const ms = new Date(until).getTime() - now;
+  if (ms <= 60_000) return "less than a minute";
+  const mins = Math.floor(ms / 60_000);
+  const h = Math.floor(mins / 60);
+  return h ? `${h}h ${mins % 60}m` : `${mins}m`;
+};
+
+/** Live status badge computed from start/end at render time (server sends the same). */
+const liveStatusOf = (hall: any, now: number): string | null => {
+  if (!hall.startAt || !hall.endAt) return hall.liveStatus ?? null;
+  if (now < new Date(hall.startAt).getTime()) return "UPCOMING";
+  if (now < new Date(hall.endAt).getTime()) return "LIVE";
+  return "COMPLETED";
+};
 
 const generateGoogleCalendarUrl = (examDate: string, examTime?: string, hallName?: string) => {
   if (!examDate) return "#";
@@ -51,6 +80,15 @@ const FacultyDashboard = () => {
     reason: ""
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Clock for live status / countdowns, and the absentee upload dialog
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const [uploadFor, setUploadFor] = useState<{ planType: string; planId: string; hallId: string } | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   // Request Notification permission
   useEffect(() => {
@@ -127,7 +165,7 @@ const FacultyDashboard = () => {
     // Poll every 10 seconds to show popup when plan is updated centrally
     const interval = setInterval(fetchAssignedHalls, 10000);
     return () => clearInterval(interval);
-  }, [navigate, toast]);
+  }, [navigate, toast, refreshTick]);
 
   const handleLogout = () => {
     logout();
@@ -212,6 +250,23 @@ const FacultyDashboard = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
+        <Tabs defaultValue="duties">
+        <TabsList className="mb-4">
+          <TabsTrigger value="duties">Assigned Duties</TabsTrigger>
+          <TabsTrigger value="history">My Duties</TabsTrigger>
+        </TabsList>
+        <TabsContent value="history">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">My Exam Duty History</CardTitle>
+              <CardDescription>Duties from published exam plans, by exam.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {user && <FacultyDutyHistory facultyId={String(user._id || user.id)} />}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="duties">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">Your Assigned Duties</h2>
         </div>
@@ -219,7 +274,110 @@ const FacultyDashboard = () => {
         {loading ? (
           <p>Loading your assigned duties...</p>
         ) : assignedHalls.length > 0 ? (
-          assignedHalls.map((hall, index) => (
+          assignedHalls.map((hall, index) => {
+            if ((hall as any).isScheduled) {
+              return (
+                <Card key={`${hall._id || index}-${index}`} className="mb-4 shadow-sm border-indigo-200 bg-indigo-50/20">
+                  <CardHeader className="bg-indigo-50/50 pb-3 border-b">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <CardTitle className="text-lg flex items-center gap-2 text-indigo-950">
+                          <Clock className="h-5 w-5 text-indigo-600" />
+                          Exam Duty Announcement Scheduled
+                        </CardTitle>
+                        <CardDescription className="text-xs text-indigo-700 mt-1">
+                          You have an upcoming assigned invigilation duty for this session
+                        </CardDescription>
+                      </div>
+                      <Badge className="w-fit bg-indigo-100 text-indigo-800 border-indigo-200 font-semibold px-3 py-1">
+                        {hall.examSession ? `${hall.examSession} Session` : "FN Session"}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-indigo-50/60 p-3 rounded-lg border border-indigo-100 text-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
+                          <Calendar className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-slate-500">Exam Date</p>
+                          <p className="font-semibold text-slate-900">{hall.examDate || "Upcoming"}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
+                          <Clock className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-slate-500">Goes Live</p>
+                          <p className="font-semibold text-slate-900">{(hall as any).publish_at_formatted || ((hall as any).publish_at ? new Date((hall as any).publish_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }) : "Scheduled")}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-indigo-800 italic">
+                      {(hall as any).message || `Duty details (hall assignment & students) will be revealed on ${(hall as any).publish_at_formatted}.`}
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            if ((hall as any).isReserve) {
+              return (
+                <Card key={`${hall._id || index}-${index}`} className="mb-4 shadow-sm border-indigo-200 bg-white">
+                  <CardHeader className="bg-indigo-50/60 pb-3 border-b border-indigo-100">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <CardTitle className="text-lg flex items-center gap-2 text-indigo-950">
+                          <ShieldAlert className="h-5 w-5 text-indigo-600" />
+                          Reserve Invigilator Duty (Standby)
+                        </CardTitle>
+                        <CardDescription className="text-xs text-indigo-700 mt-1">
+                          You are assigned as standby reserve faculty. Report to Examination Control Cell before the session starts.
+                        </CardDescription>
+                      </div>
+                      <div className="flex gap-2">
+                        {liveStatusOf(hall, now) && (
+                          <Badge className={`w-fit border ${LIVE_BADGE[liveStatusOf(hall, now)!].className}`}>{LIVE_BADGE[liveStatusOf(hall, now)!].label}</Badge>
+                        )}
+                        <Badge className="w-fit bg-indigo-600 text-white font-bold px-3 py-1">
+                          {hall.examSession ? `${hall.examSession} Session` : "FN Session"}
+                        </Badge>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-indigo-50/40 p-3 rounded-lg border border-indigo-100 text-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
+                          <Calendar className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-slate-500">Exam Date</p>
+                          <p className="font-semibold text-slate-900">{hall.examDate}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="bg-indigo-100 p-2 rounded-full text-indigo-600">
+                          <Clock className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-slate-500">Reporting Slot / Time</p>
+                          <p className="font-semibold text-slate-900">{hall.examTime || (hall.examSession === 'AN' ? '01:00 PM' : '09:00 AM')}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                      <span>Standby reserves will be assigned to a hall if any invigilator requires emergency replacement.</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            return (
             <Card key={`${hall._id}-${index}`} className="mb-4 shadow-sm border-slate-200">
               <CardHeader className="bg-slate-50/50 pb-3 border-b">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -237,9 +395,17 @@ const FacultyDashboard = () => {
                       Exam duty assigned from official timetable & seating roster
                     </CardDescription>
                   </div>
-                  <Badge className="w-fit bg-blue-100 text-blue-800 border-blue-200 font-semibold px-3 py-1">
-                    {hall.examSession ? `${hall.examSession} Session` : "FN Session"}
-                  </Badge>
+                  <div className="flex gap-2">
+                    {liveStatusOf(hall, now) && (
+                      <Badge className={`w-fit border gap-1 ${LIVE_BADGE[liveStatusOf(hall, now)!].className}`}>
+                        {liveStatusOf(hall, now) === "LIVE" && <Radio className="h-3 w-3" />}
+                        {LIVE_BADGE[liveStatusOf(hall, now)!].label}
+                      </Badge>
+                    )}
+                    <Badge className="w-fit bg-blue-100 text-blue-800 border-blue-200 font-semibold px-3 py-1">
+                      {hall.examSession ? `${hall.examSession} Session` : "FN Session"}
+                    </Badge>
+                  </div>
                 </div>
               </CardHeader>
 
@@ -263,11 +429,43 @@ const FacultyDashboard = () => {
                     <div>
                       <p className="text-xs font-medium text-slate-500">Timetable Slot / Time</p>
                       <p className="font-semibold text-slate-900">
-                        {hall.examTime || (hall.examSession === "AN" ? "01:30 PM - 04:30 PM" : "09:30 AM - 12:30 PM")}
+                        {(hall as any).startAt && (hall as any).endAt
+                          ? `${timeIST((hall as any).startAt)} - ${timeIST((hall as any).endAt)}`
+                          : hall.examTime || (hall.examSession === "AN" ? "01:30 PM - 04:30 PM" : "09:30 AM - 12:30 PM")}
                       </p>
                     </div>
                   </div>
                 </div>
+
+                {/* Absentee upload: own hall only, only inside the window after the exam goes live */}
+                {(hall as any).absentee && (() => {
+                  const a = (hall as any).absentee;
+                  const open = now >= new Date(a.opensAt).getTime() && now <= new Date(a.closesAt).getTime();
+                  const closed = now > new Date(a.closesAt).getTime();
+                  return (
+                    <div className={`rounded-lg border p-3 text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${open ? "border-red-200 bg-red-50/60" : "border-slate-200 bg-slate-50"}`}>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold flex items-center gap-1.5">
+                          {open ? <Timer className="h-4 w-4 text-red-600" /> : closed ? <Lock className="h-4 w-4 text-slate-500" /> : <Clock className="h-4 w-4 text-slate-500" />}
+                          {open ? `Absentee upload closes in ${remaining(a.closesAt, now)}`
+                            : closed ? "Absentee upload closed"
+                            : `Absentee upload opens at ${timeIST(a.opensAt)}`}
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          {a.submitted
+                            ? `Submitted: ${a.absenteeCount} absent (${new Date(a.submittedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })})`
+                            : closed ? "No absentee list was submitted for this hall." : "Not submitted yet."}
+                        </p>
+                      </div>
+                      {open && (
+                        <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white gap-1"
+                          onClick={() => setUploadFor({ planType: (hall as any).planType, planId: (hall as any).planId, hallId: String(hall._id) })}>
+                          <Upload className="h-4 w-4" /> {a.submitted ? "Edit Absentees" : "Upload Absentees"}
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Core Workflow Process Status */}
                 <div className="pt-2 border-t border-slate-100">
@@ -323,7 +521,8 @@ const FacultyDashboard = () => {
                 </div>
               </CardFooter>
             </Card>
-          ))
+          );
+        })
         ) : (
           <Card>
             <CardHeader>
@@ -334,6 +533,9 @@ const FacultyDashboard = () => {
             </CardContent>
           </Card>
         )}
+
+        </TabsContent>
+        </Tabs>
 
         {/* Delegation Requests History */}
         <div className="mt-12">
@@ -369,6 +571,17 @@ const FacultyDashboard = () => {
         </div>
 
       </div>
+
+      {uploadFor && (
+        <AbsenteeUploadDialog
+          open
+          onClose={() => setUploadFor(null)}
+          planType={uploadFor.planType}
+          planId={uploadFor.planId}
+          hallId={uploadFor.hallId}
+          onSubmitted={() => setRefreshTick(n => n + 1)}
+        />
+      )}
 
       <Dialog open={isDelegationModalOpen} onOpenChange={setIsDelegationModalOpen}>
         <DialogContent className="max-w-md">

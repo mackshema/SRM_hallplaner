@@ -7,7 +7,16 @@ const Faculty = User; // Alias for readability in this file
 import FacultyDuty from "../models/FacultyDuty.js";
 import SeatingPlan from "../models/SeatingPlan.js";
 import InternalExamData from "../models/InternalExamData.js"; // AL-01
+import AnnaSeating from "../models/AnnaSeating.js";
+import ReserveFaculty from "../models/ReserveFaculty.js";
 import { previousSession as findPreviousSession, dutiesFromAssignments } from "../utils/facultyDuties.js";
+import { isLocked, isPlanVisible } from "../utils/planStatus.js";
+import { allocateFaculty, vacancyMessage } from "../utils/facultyAllocation.js";
+import { normalizePlan, reserveQueryForPlan } from "../services/planService.js";
+import { onPlanChanged } from "../services/planLifecycle.js";
+import { totalDutyCounts, reservedFacultyIds } from "../services/facultyPickerService.js";
+import { getFacultyDutyCards } from "../services/facultyDashboardService.js";
+import { hallAbsenteeWindow, isAssignedInvigilator } from "../services/absenteeService.js";
 
 const getDateDaysAgo = (dateStr, days) => {
   const d = new Date(dateStr);
@@ -35,7 +44,7 @@ export const saveSeatingPlan = async (req, res) => {
       return res.status(404).json({ error: "Exam session not found" });
     }
 
-    if (session.status === "FINAL") {
+    if (isLocked(session.status)) {
       return res.status(400).json({ error: "Cannot edit a finalized seating plan" });
     }
 
@@ -96,8 +105,8 @@ export const getHallSeating = async (req, res) => {
     // Determine Faculty
     let facultyAssigned = [];
 
-    // If FINAL, source of truth is FacultyDuty
-    if (session.status === 'FINAL') {
+    // Locked plans (FINAL / SCHEDULED / PUBLISHED): source of truth is FacultyDuty
+    if (isLocked(session.status)) {
       const duties = await FacultyDuty.find({
         hallId,
         examDate: session.examDate,
@@ -105,22 +114,38 @@ export const getHallSeating = async (req, res) => {
       });
       facultyAssigned = duties.map(d => d.facultyId);
     } else {
-      // If DRAFT, source is Hall.facultyAssigned (Transient)
-      // Note: This shared field means multiple drafts conflict. 
-      // Ideally, we'd store draft assignments per session, but for now we follow the single-draft-context assumption.
-      const hall = await Hall.findById(hallId);
-      facultyAssigned = hall ? hall.facultyAssigned : [];
+      // Draft: the session's own assignments (AL-07), falling back to the
+      // deprecated Hall.facultyAssigned for pre-AL-07 drafts
+      const fa = (session.facultyAssignments || []).find(a => String(a.hallId) === String(hallId));
+      if (fa) {
+        facultyAssigned = fa.facultyIds;
+      } else {
+        const hall = await Hall.findById(hallId);
+        facultyAssigned = hall ? hall.facultyAssigned : [];
+      }
     }
+
+    // Reserve faculty of this plan, shown at the bottom of the bench layout
+    const plan = normalizePlan("internal", session);
+    const reserves = await ReserveFaculty.find(reserveQueryForPlan(plan, ["reserve"]))
+      .populate("facultyId", "name department designation").lean();
 
     const examMetadata = {
       examDate: session.examDate,
       examSession: session.examSession,
-      examTime: session.examTime
+      examTime: session.examTime,
+      status: session.status
     };
 
     res.json({
       assignments,
       facultyAssigned,
+      reserveFaculty: reserves.filter(r => r.facultyId).map(r => ({
+        _id: r.facultyId._id,
+        name: r.facultyId.name,
+        department: r.facultyId.department || "",
+        designation: r.facultyId.designation || ""
+      })),
       ...examMetadata
     });
   } catch (err) {
@@ -152,26 +177,16 @@ export const getFacultyHallSummary = async (req, res) => {
   try {
     const { facultyId } = req.params;
 
-    // 1. Get finalized duties
-    const duties = await FacultyDuty.find({ facultyId }).populate('hallId');
+    // A faculty member may only read their own duties; admins can read anyone's
+    if (req.user?.role !== "admin" && String(req.user?.id) !== String(facultyId)) {
+      return res.status(403).json({ message: "You can only view your own duties." });
+    }
 
-    // 2. Sort duties by date (do not filter out past dates as faculty should see their history or test data)
-    const upcomingDuties = duties.sort((a, b) => new Date(b.examDate) - new Date(a.examDate));
-
-    // Transform to summary format
-    const summary = upcomingDuties.map(duty => ({
-      hallId: duty.hallId._id,
-      hallName: duty.hallId.name,
-      floor: duty.hallId.floor || "",
-      examDate: duty.examDate,
-      examSession: duty.examSession,
-      examTime: duty.examTime,
-      // examSessionId is not directly on duty but implied by date/session
-    }));
-
-    res.json(summary);
+    // Duty cards (hall + reserve), each respecting the scheduled-publish rule,
+    // with exam live status and absentee upload window
+    res.json(await getFacultyDutyCards(facultyId));
   } catch (error) {
-    console.error("Faculty summary error:", error);
+    console.error("Error fetching faculty hall summary:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -196,7 +211,7 @@ export const generateSeatingPlan = async (req, res) => {
     if (!session) {
       return res.status(404).json({ message: "Exam Session not found" });
     }
-    if (session.status === "FINAL") {
+    if (isLocked(session.status)) {
       return res.status(400).json({ message: "Cannot regenerate a finalized session" });
     }
 
@@ -684,7 +699,7 @@ export const generateSeatingPlan = async (req, res) => {
     }).select('facultyId examDate examSession').lean();
     // Draft sessions have invigilators but no FacultyDuty records until finalized
     const draftDuties = otherSessions
-      .filter(s => s.status !== 'FINAL')
+      .filter(s => !isLocked(s.status))
       .flatMap(s => dutiesFromAssignments(s.examDate, s.examSession, s.facultyAssignments))
       .filter(d => d.examDate >= sevenDaysAgo && d.examDate <= examDateStr);
     const recentDuties = [...savedDuties, ...draftDuties];
@@ -717,58 +732,26 @@ export const generateSeatingPlan = async (req, res) => {
       weeklyDutyCount[id] = (weeklyDutyCount[id] || 0) + 1;
     });
 
-    // Helper to check constraints
-    const isFacultyAvailable = (faculty, hall, currentAssignments, examDate) => {
+    // Hard constraint: reserves of this slot can't also invigilate (and vice versa)
+    const reservedSet = await reservedFacultyIds(examDateStr, session.examSession);
+
+    // Hard rules for this session. The department limit is no longer a fixed
+    // "max 2 per hall": allocateFaculty applies a per-run department quota.
+    const isFacultyAvailable = (faculty) => {
       const fId = faculty._id.toString();
       const isDemand = demandFacultyIds.includes(fId);
 
-      // 1. Already assigned to this hall (in current batch)
-      if (currentAssignments.includes(fId)) return false;
+      // Same Session Duplicate / Reserve: cannot be in two places at once (HARD CONSTRAINT)
+      if (sameSessionFacultySet.has(fId) || reservedSet.has(fId)) return false;
 
-      // 2. Department Cap: Max 2 from same dept per hall
-      const sameDeptCount = currentAssignments.filter(id => {
-        const f = allFaculty.find(fac => fac._id.toString() === id);
-        return f && f.department === faculty.department;
-      }).length;
-      if (sameDeptCount >= 2 && !isDemand) return false;
+      // No Continuous Participation (Unless Demand)
+      if (prevSessionFacultySet.has(fId) && !isDemand) return false;
 
-      // 3. Same Session Duplicate: Cannot be in two places at once (HARD CONSTRAINT)
-      if (sameSessionFacultySet.has(fId)) return false;
-
-      // 4. No Continuous Participation (Unless Demand)
-      if (prevSessionFacultySet.has(fId) && !isDemand) {
-        return false;
-      }
-
-      // 5. Weekly Limit: Max 4 duties (User Rule)
-      if (!isDemand) {
-        const count = weeklyDutyCount[fId] || 0;
-        if (count >= 4) return false;
-      }
+      // Weekly Limit: Max 4 duties (User Rule)
+      if (!isDemand && (weeklyDutyCount[fId] || 0) >= 4) return false;
 
       return true;
     };
-
-    // 2.4 Allocation Loop
-    const allocationResult = {
-      shortage: false,
-      warnings: [],
-      suggestions: []
-    };
-
-    const globalAssignedIds = new Set();
-
-    // Shuffle faculty for randomization
-    let shuffledFaculty = [...allFaculty];
-    for (let i = shuffledFaculty.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffledFaculty[i], shuffledFaculty[j]] = [shuffledFaculty[j], shuffledFaculty[i]];
-    }
-
-    // AL-07: collector for session-scoped faculty assignments
-    // Written to ExamSession in one shot after the loop — prevents
-    // concurrent sessions overwriting each other via Hall.facultyAssigned.
-    const sessionFacultyAssignments = [];
 
     // AL-07 Step 4: clear stale Hall-level data so old UI reads show nothing
     // (non-blocking — backward compat for any pre-AL-07 Hall reads)
@@ -780,60 +763,43 @@ export const generateSeatingPlan = async (req, res) => {
 
     // Only assign faculty to halls that actually received students
     const hallsWithStudents = new Set(assignments.map(a => a.hallId.toString()));
+    const hallsToStaff = orderedHalls
+      .filter(h => hallsWithStudents.has(h._id.toString()))
+      .map(h => ({ hallId: h._id, hallName: h.name, required: h.facultyRequired || 1 }));
 
-    // Iterate Halls — skip empty halls
-    for (const hall of orderedHalls) {
-      if (!hallsWithStudents.has(hall._id.toString())) {
-        continue; // No students → no faculty needed (Hall already cleared above)
-      }
-
-      const required = hall.facultyRequired || 1;
-      const hallAssignedIds = [];
-
-      for (let i = 0; i < required; i++) {
-        let selected = null;
-
-        for (const faculty of shuffledFaculty) {
-          const fId = faculty._id.toString();
-          if (globalAssignedIds.has(fId)) continue;
-
-          if (isFacultyAvailable(faculty, hall, hallAssignedIds, examDate)) {
-            selected = faculty;
-            break;
-          }
-        }
-
-        if (selected) {
-          const fId = selected._id.toString();
-          hallAssignedIds.push(fId);
-          globalAssignedIds.add(fId);
-        } else {
-          allocationResult.shortage = true;
-          allocationResult.warnings.push(`Hall ${hall.name}: Could not find enough faculty (Need ${required}, got ${hallAssignedIds.length})`);
-        }
-      }
-
-      // AL-07: push to session-scoped collector instead of writing to Hall
-      // This prevents concurrent generation runs from overwriting each other.
-      sessionFacultyAssignments.push({
-        hallId: hall._id,
-        facultyIds: hallAssignedIds
-      });
-    }
+    // 2.4 Allocation: department quota + fairness (fewer total duties first)
+    const allocation = allocateFaculty({
+      halls: hallsToStaff,
+      faculty: allFaculty,
+      isEligible: isFacultyAvailable,
+      dutyCounts: await totalDutyCounts(),
+      demandIds: demandFacultyIds,
+    });
 
     // AL-07: persist all faculty assignments to ExamSession in one atomic write
+    // (session-scoped, so concurrent generation runs never overwrite each other)
     await ExamSession.findByIdAndUpdate(examSessionId, {
-      $set: { facultyAssignments: sessionFacultyAssignments }
+      $set: { facultyAssignments: allocation.facultyAssignments }
     });
+
+    const allocationResult = {
+      shortage: allocation.vacancies.length > 0,
+      warnings: allocation.vacancies.map(v => `Hall ${v.hallName}: Could not find enough faculty (Need ${v.required}, got ${v.assigned})`),
+      suggestions: [],
+      vacancies: allocation.vacancies,
+      vacancyMessage: vacancyMessage(allocation.vacancies),
+      departmentQuota: allocation.quota,
+    };
 
     // If there is a shortage, provide suggestions
     if (allocationResult.shortage) {
       // Suggest all faculty who are free in this session (ignoring soft limits like continuous/weekly caps)
+      const assignedIds = new Set(allocation.facultyAssignments.flatMap(a => a.facultyIds));
       const allFacultyInDb = await Faculty.find({ role: "faculty" }).lean();
 
       allocationResult.suggestions = allFacultyInDb
-        .filter(f => !globalAssignedIds.has(f._id.toString())) // Not already assigned in this generation run
-        .filter(f => !sameSessionFacultySet.has(f._id.toString())) // No duplicate duty in this same session
+        .filter(f => !assignedIds.has(f._id.toString())) // Not already assigned in this generation run
+        .filter(f => !sameSessionFacultySet.has(f._id.toString()) && !reservedSet.has(f._id.toString())) // No duplicate duty in this same session
         .map(f => ({ id: f._id, name: f.name, department: f.department }));
     }
 
@@ -876,7 +842,7 @@ export const finalizeSeatingPlan = async (req, res) => {
     if (!session) {
       return res.status(404).json({ error: "Exam session not found" });
     }
-    if (session.status === "FINAL") {
+    if (isLocked(session.status)) {
       return res.status(400).json({ error: "Exam session is already finalized." });
     }
 
@@ -957,6 +923,7 @@ export const finalizeSeatingPlan = async (req, res) => {
     const plan = new SeatingPlan(seatingPlanData);
     await plan.save();
 
+    await onPlanChanged("internal", examSessionId, { reason: "plan finalized" });
     res.json(session);
   } catch (err) {
     console.error("Finalize error:", err);
@@ -990,12 +957,25 @@ export const markAbsent = async (req, res) => {
       return res.status(404).json({ message: 'Assignment not found.' });
     }
 
-    // Safety: only allow marking on FINAL published sessions
+    // Safety: only allow marking on finalized sessions that are published and live
     const session = await ExamSession.findById(assignment.examSessionId);
-    if (!session || session.status !== 'FINAL' || !session.isPublished) {
+    if (!session || !isLocked(session.status) || !isPlanVisible(session)) {
       return res.status(400).json({
         message: 'Can only mark absences on published final sessions.'
       });
+    }
+
+    // Faculty: only the invigilator of this hall, and only inside the upload
+    // window when the plan has exam timing (same rules as the absentee upload)
+    if (req.user?.role !== 'admin') {
+      const plan = normalizePlan("internal", session);
+      if (!(await isAssignedInvigilator(plan, assignment.hallId, req.user.id))) {
+        return res.status(403).json({ message: 'You can only mark absentees in the hall you are invigilating.' });
+      }
+      const window = await hallAbsenteeWindow(plan, assignment.hallId, req.user.id);
+      if (window && !window.isOpen) {
+        return res.status(403).json({ message: 'The absentee upload window is closed.' });
+      }
     }
 
     assignment.isAbsent = isAbsent === true;

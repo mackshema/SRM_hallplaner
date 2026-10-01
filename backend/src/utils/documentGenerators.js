@@ -1,6 +1,223 @@
-import { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, AlignmentType, WidthType, PageOrientation, BorderStyle, ImageRun } from "docx";
+import { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, AlignmentType, WidthType, PageOrientation, BorderStyle, ImageRun, Header, VerticalAlign } from "docx";
+import { parseLogo, fitWithin } from "./logo.js";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+
+
+export const parseBase64Image = (dataUrl) => {
+    if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.trim()) return null;
+    try {
+        if (dataUrl.startsWith('data:')) {
+            const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+            if (matches) {
+                let type = matches[1].toLowerCase();
+                if (type === 'jpeg') type = 'jpg';
+                return {
+                    buffer: Buffer.from(matches[2], 'base64'),
+                    type: ['jpg', 'png', 'gif', 'bmp'].includes(type) ? type : 'png'
+                };
+            }
+        }
+        const buffer = Buffer.from(dataUrl, 'base64');
+        return { buffer, type: 'png' };
+    } catch (e) {
+        console.error('Error parsing logo image:', e);
+        return null;
+    }
+};
+
+const NO_BORDERS = {
+    top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+    bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+    left: { style: BorderStyle.NONE, size: 0, color: "auto" },
+    right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+    insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "auto" },
+    insideVertical: { style: BorderStyle.NONE, size: 0, color: "auto" },
+};
+
+// Logo box in the page header (pixels). Aspect ratio is kept; large images are scaled down.
+const LOGO_MAX = { width: 110, height: 64 };
+
+const logoParagraph = (logo, alignment) => {
+    if (!logo) return new Paragraph("");
+    const size = fitWithin(logo.width, logo.height, LOGO_MAX.width, LOGO_MAX.height);
+    return new Paragraph({
+        alignment,
+        children: [new ImageRun({
+            data: logo.buffer,
+            type: logo.type,
+            transformation: { width: Math.round(size.width), height: Math.round(size.height) },
+        })],
+    });
+};
+
+/**
+ * Page header shared by every Word export: logo(s) from Settings beside the
+ * institution name. Being a real Word header it repeats on every page and
+ * doesn't push the body tables around. Without a logo, just the text.
+ */
+export const buildDocxPageHeader = (headerSettings = {}) => {
+    const left = parseLogo(headerSettings.leftLogo);
+    const right = parseLogo(headerSettings.rightLogo);
+    const text = [
+        new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ text: headerSettings.institutionName || "SRM MADURAI", bold: true, size: 32 })],
+        }),
+        new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY", size: 24 })],
+        }),
+        new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ text: headerSettings.institutionAffiliation || "Approved by AICTE | Affiliated to Anna University", size: 18 })],
+        }),
+    ];
+    if (!left && !right) return new Header({ children: text });
+    return new Header({
+        children: [new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: NO_BORDERS,
+            rows: [new TableRow({
+                children: [
+                    new TableCell({ width: { size: 15, type: WidthType.PERCENTAGE }, verticalAlign: VerticalAlign.CENTER, borders: NO_BORDERS, children: [logoParagraph(left, AlignmentType.LEFT)] }),
+                    new TableCell({ width: { size: 70, type: WidthType.PERCENTAGE }, verticalAlign: VerticalAlign.CENTER, borders: NO_BORDERS, children: text }),
+                    new TableCell({ width: { size: 15, type: WidthType.PERCENTAGE }, verticalAlign: VerticalAlign.CENTER, borders: NO_BORDERS, children: [logoParagraph(right, AlignmentType.RIGHT)] }),
+                ],
+            })],
+        })],
+    });
+};
+
+/** Body title lines under the page header (exam cell, year, exam name, document title). */
+export const buildDocxHeaderElements = (headerSettings = {}, extraTitle = "SEATING ARRANGEMENT") => {
+    const headerElements = [];
+
+    if (headerSettings.examCellName) {
+        headerElements.push(
+            new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                    new TextRun({
+                        text: headerSettings.examCellName || "EXAMINATION CELL",
+                        bold: true,
+                        size: 28, // 14pt
+                    }),
+                ],
+            })
+        );
+    }
+    if (headerSettings.academicYear) {
+        headerElements.push(
+            new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                    new TextRun({
+                        text: headerSettings.academicYear || "ACADEMIC YEAR 2025-2026",
+                        size: 22, // 11pt
+                    }),
+                ],
+            })
+        );
+    }
+    if (headerSettings.examName) {
+        headerElements.push(
+            new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                    new TextRun({
+                        text: headerSettings.examName || "INTERNAL ASSESSMENT TEST",
+                        size: 22,
+                    }),
+                ],
+            })
+        );
+    }
+    if (extraTitle) {
+        headerElements.push(
+            new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 300 },
+                children: [
+                    new TextRun({
+                        text: extraTitle,
+                        size: 22,
+                    }),
+                ],
+            })
+        );
+    }
+
+    return headerElements;
+};
+
+
+export const buildDocxFooter = (reserveFaculty = []) => {
+    let reserveNames = [];
+    if (Array.isArray(reserveFaculty)) {
+        reserveNames = reserveFaculty.map(r => {
+            if (!r) return "";
+            if (typeof r === 'string') return r;
+            const fac = r.facultyId || r;
+            const name = fac.name || "Faculty";
+            const dept = fac.department ? ` (${fac.department})` : "";
+            return `${name}${dept}`;
+        }).filter(Boolean);
+    }
+    const reserveText = reserveNames.length > 0
+        ? `Reserve Faculty: ${reserveNames.join(', ')}`
+        : "Reserve Faculty: None assigned";
+
+    return new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: {
+            top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+            bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+            left: { style: BorderStyle.NONE, size: 0, color: "auto" },
+            right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+            insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "auto" },
+            insideVertical: { style: BorderStyle.NONE, size: 0, color: "auto" },
+        },
+        rows: [
+            new TableRow({
+                children: [
+                    new TableCell({
+                        width: { size: 50, type: WidthType.PERCENTAGE },
+                        children: [
+                            new Paragraph({
+                                children: [
+                                    new TextRun({
+                                        text: reserveText,
+                                        bold: true,
+                                        size: 20
+                                    })
+                                ],
+                                alignment: AlignmentType.LEFT,
+                                spacing: { before: 800 }
+                            })
+                        ]
+                    }),
+                    new TableCell({
+                        width: { size: 50, type: WidthType.PERCENTAGE },
+                        children: [
+                            new Paragraph({
+                                children: [
+                                    new TextRun({
+                                        text: "Name & Signature of the Hall Superintendent",
+                                        bold: true,
+                                        size: 20
+                                    })
+                                ],
+                                alignment: AlignmentType.RIGHT,
+                                spacing: { before: 800 }
+                            })
+                        ]
+                    })
+                ]
+            })
+        ]
+    });
+};
 
 // 1. generateBenchLayoutDocx
 export const generateBenchLayoutDocx = async ({
@@ -11,167 +228,10 @@ export const generateBenchLayoutDocx = async ({
     examSession,
     examTime,
     headerSettings,
+    reserveFaculty = [],
 }) => {
     // 1. Prepare Header Paragraphs
-    const headerElements = [];
-    if (headerSettings.leftLogo || headerSettings.rightLogo) {
-        headerElements.push(new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            borders: {
-                top: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                left: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                right: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                insideVertical: { style: BorderStyle.NONE, size: 0, color: "auto" },
-            },
-            rows: [
-                new TableRow({
-                    children: [
-                        new TableCell({
-                            width: { size: 15, type: WidthType.PERCENTAGE },
-                            children: [
-                                headerSettings.leftLogo ? (() => {
-                                    const type = headerSettings.leftLogo.substring(headerSettings.leftLogo.indexOf('/') + 1, headerSettings.leftLogo.indexOf(';'));
-                                    return new Paragraph({
-                                        children: [new ImageRun({
-                                            data: Buffer.from(headerSettings.leftLogo.split(",")[1], "base64"),
-                                            transformation: { width: 80, height: 80 },
-                                            type: type === 'jpeg' ? 'jpg' : type
-                                        })],
-                                        alignment: AlignmentType.LEFT
-                                    });
-                                })() : new Paragraph("")
-                            ]
-                        }),
-                        new TableCell({
-                            width: { size: 70, type: WidthType.PERCENTAGE },
-                            children: [
-                                new Paragraph({
-                                    alignment: AlignmentType.CENTER,
-                                    children: [
-                                        new TextRun({
-                                            text: headerSettings.institutionName || "SRM MADURAI",
-                                            bold: true,
-                                            size: 36, // 18pt
-                                        }),
-                                    ],
-                                }),
-                                new Paragraph({
-                                    alignment: AlignmentType.CENTER,
-                                    children: [
-                                        new TextRun({
-                                            text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY",
-                                            size: 28, // 14pt
-                                        }),
-                                    ],
-                                }),
-                                new Paragraph({
-                                    alignment: AlignmentType.CENTER,
-                                    spacing: { after: 200 },
-                                    children: [
-                                        new TextRun({
-                                            text: headerSettings.institutionAffiliation || "Approved by AICTE | Affiliated to Anna University",
-                                            size: 20, // 10pt
-                                        }),
-                                    ],
-                                })
-                            ]
-                        }),
-                        new TableCell({
-                            width: { size: 15, type: WidthType.PERCENTAGE },
-                            children: [
-                                headerSettings.rightLogo ? (() => {
-                                    const type = headerSettings.rightLogo.substring(headerSettings.rightLogo.indexOf('/') + 1, headerSettings.rightLogo.indexOf(';'));
-                                    return new Paragraph({
-                                        children: [new ImageRun({
-                                            data: Buffer.from(headerSettings.rightLogo.split(",")[1], "base64"),
-                                            transformation: { width: 80, height: 80 },
-                                            type: type === 'jpeg' ? 'jpg' : type
-                                        })],
-                                        alignment: AlignmentType.RIGHT
-                                    });
-                                })() : new Paragraph("")
-                            ]
-                        })
-                    ]
-                })
-            ]
-        }));
-    } else {
-        headerElements.push(
-            new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                    new TextRun({
-                        text: headerSettings.institutionName || "SRM MADURAI",
-                        bold: true,
-                        size: 36, // 18pt
-                    }),
-                ],
-            }),
-            new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                    new TextRun({
-                        text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY",
-                        size: 28, // 14pt
-                    }),
-                ],
-            }),
-            new Paragraph({
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 200 },
-                children: [
-                    new TextRun({
-                        text: headerSettings.institutionAffiliation || "Approved by AICTE | Affiliated to Anna University",
-                        size: 20, // 10pt
-                    }),
-                ],
-            })
-        );
-    }
-    
-    headerElements.push(
-        new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [
-                new TextRun({
-                    text: headerSettings.examCellName || "EXAMINATION CELL",
-                    bold: true,
-                    size: 28, // 14pt
-                }),
-            ],
-        }),
-        new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [
-                new TextRun({
-                    text: headerSettings.academicYear || "ACADEMIC YEAR 2025-2026",
-                    size: 22, // 11pt
-                }),
-            ],
-        }),
-        new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [
-                new TextRun({
-                    text: headerSettings.examName || "INTERNAL ASSESSMENT TEST",
-                    size: 22,
-                }),
-            ],
-        }),
-        new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 300 },
-            children: [
-                new TextRun({
-                    text: "SEATING ARRANGEMENT",
-                    size: 22,
-                }),
-            ],
-        })
-    );
+    const headerElements = buildDocxHeaderElements(headerSettings, "SEATING ARRANGEMENT");
 
     // 2. Hall Info & Date Row
     const infoTable = new Table({
@@ -412,6 +472,7 @@ export const generateBenchLayoutDocx = async ({
                         margin: { top: 720, right: 720, bottom: 720, left: 720 },
                     },
                 },
+                headers: { default: buildDocxPageHeader(headerSettings) },
                 children: [
                     ...headerElements,
                     infoTable,
@@ -429,11 +490,8 @@ export const generateBenchLayoutDocx = async ({
                         italics: true,
                         spacing: { before: 300 },
                     }),
-                    new Paragraph({
-                        text: "Name & Signature of the Hall Superintendent",
-                        alignment: AlignmentType.RIGHT,
-                        spacing: { before: 800 },
-                    }),
+                    // Reserve faculty (left) opposite the signature line (right)
+                    buildDocxFooter(reserveFaculty),
                 ],
             },
         ],
@@ -450,6 +508,7 @@ export const generateAllBenchLayoutsDocx = async ({
     examSession,
     examTime,
     headerSettings,
+    reserveFaculty = [],
 }) => {
     const sections = [];
 
@@ -458,79 +517,7 @@ export const generateAllBenchLayoutsDocx = async ({
         const hallAssignments = seatAssignments.filter(a => a.hallId.toString() === hall._id.toString());
         if(hallAssignments.length === 0) continue;
 
-        const headerElements = [];
-        if (headerSettings.leftLogo || headerSettings.rightLogo) {
-            headerElements.push(new Table({
-                width: { size: 100, type: WidthType.PERCENTAGE },
-                borders: {
-                    top: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                    bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                    left: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                    right: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                    insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                    insideVertical: { style: BorderStyle.NONE, size: 0, color: "auto" },
-                },
-                rows: [
-                    new TableRow({
-                        children: [
-                            new TableCell({
-                                width: { size: 15, type: WidthType.PERCENTAGE },
-                                children: [
-                                    headerSettings.leftLogo ? (() => {
-                                        const type = headerSettings.leftLogo.substring(headerSettings.leftLogo.indexOf('/') + 1, headerSettings.leftLogo.indexOf(';'));
-                                        return new Paragraph({
-                                            children: [new ImageRun({
-                                                data: Buffer.from(headerSettings.leftLogo.split(",")[1], "base64"),
-                                                transformation: { width: 80, height: 80 },
-                                                type: type === 'jpeg' ? 'jpg' : type
-                                            })],
-                                            alignment: AlignmentType.LEFT
-                                        });
-                                    })() : new Paragraph("")
-                                ]
-                            }),
-                            new TableCell({
-                                width: { size: 70, type: WidthType.PERCENTAGE },
-                                children: [
-                                    new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headerSettings.institutionName || "SRM MADURAI", bold: true, size: 36 })] }),
-                                    new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY", size: 28 })] }),
-                                    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [new TextRun({ text: headerSettings.institutionAffiliation || "Approved by AICTE | Affiliated to Anna University", size: 20 })] })
-                                ]
-                            }),
-                            new TableCell({
-                                width: { size: 15, type: WidthType.PERCENTAGE },
-                                children: [
-                                    headerSettings.rightLogo ? (() => {
-                                        const type = headerSettings.rightLogo.substring(headerSettings.rightLogo.indexOf('/') + 1, headerSettings.rightLogo.indexOf(';'));
-                                        return new Paragraph({
-                                            children: [new ImageRun({
-                                                data: Buffer.from(headerSettings.rightLogo.split(",")[1], "base64"),
-                                                transformation: { width: 80, height: 80 },
-                                                type: type === 'jpeg' ? 'jpg' : type
-                                            })],
-                                            alignment: AlignmentType.RIGHT
-                                        });
-                                    })() : new Paragraph("")
-                                ]
-                            })
-                        ]
-                    })
-                ]
-            }));
-        } else {
-            headerElements.push(
-                new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headerSettings.institutionName || "SRM MADURAI", bold: true, size: 36 })] }),
-                new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY", size: 28 })] }),
-                new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [new TextRun({ text: headerSettings.institutionAffiliation || "Approved by AICTE | Affiliated to Anna University", size: 20 })] })
-            );
-        }
-
-        headerElements.push(
-            new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headerSettings.examCellName || "EXAMINATION CELL", bold: true, size: 28 })] }),
-            new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headerSettings.academicYear || "ACADEMIC YEAR 2025-2026", size: 22 })] }),
-            new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headerSettings.examName || "INTERNAL ASSESSMENT TEST", size: 22 })] }),
-            new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [new TextRun({ text: "SEATING ARRANGEMENT", size: 22 })] })
-        );
+        const headerElements = buildDocxHeaderElements(headerSettings, "SEATING ARRANGEMENT");
 
         const infoTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
@@ -689,6 +676,7 @@ export const generateAllBenchLayoutsDocx = async ({
                     margin: { top: 720, right: 720, bottom: 720, left: 720 },
                 },
             },
+            headers: { default: buildDocxPageHeader(headerSettings) },
             children: [
                 ...headerElements,
                 infoTable,
@@ -697,7 +685,7 @@ export const generateAllBenchLayoutsDocx = async ({
                 new Paragraph({ text: "BLACK BOARD", bold: true, alignment: AlignmentType.CENTER, spacing: { before: 200, after: 200 } }),
                 seatingGridTable,
                 new Paragraph({ text: "* It should be filled carefully by Invigilators. Encircle the Absentees.", italics: true, spacing: { before: 300 } }),
-                new Paragraph({ text: "Name & Signature of the Hall Superintendent", alignment: AlignmentType.RIGHT, spacing: { before: 800 } }),
+                buildDocxFooter(reserveFaculty),
             ],
         });
     }
@@ -706,6 +694,23 @@ export const generateAllBenchLayoutsDocx = async ({
     return await Packer.toBuffer(compiledDoc);
 };
 
+
+/** Settings logos on a jsPDF page: aspect ratio kept (max 20x20 mm), unreadable logos skipped. */
+const drawPdfLogos = (doc, headerSettings = {}, pageWidth) => {
+    const place = (value, rightAligned) => {
+        const logo = parseLogo(value);
+        if (!logo) return;
+        const size = fitWithin(logo.width, logo.height, 20, 20);
+        const x = rightAligned ? pageWidth - 14 - size.width : 14;
+        try {
+            doc.addImage(logo.dataUrl, logo.type === "jpg" ? "JPEG" : logo.type.toUpperCase(), x, 8, size.width, size.height);
+        } catch (err) {
+            console.warn("[EXPORT] Logo skipped:", err.message);
+        }
+    };
+    place(headerSettings.leftLogo, false);
+    place(headerSettings.rightLogo, true);
+};
 
 // 2. generateConsolidatedPdf
 export const generateConsolidatedPdf = async ({ assignments, halls, departments, examDate, examSession, examTime, headerSettings }) => {
@@ -717,14 +722,7 @@ export const generateConsolidatedPdf = async ({ assignments, halls, departments,
     doc.setFont("helvetica", "bold");
     doc.text(headerSettings.institutionName || "SRM MADURAI", centerX, 15, { align: "center" });
 
-    if (headerSettings.leftLogo) {
-        const format = headerSettings.leftLogo.substring(headerSettings.leftLogo.indexOf('/') + 1, headerSettings.leftLogo.indexOf(';')).toUpperCase();
-        doc.addImage(headerSettings.leftLogo, format, 14, 8, 20, 20);
-    }
-    if (headerSettings.rightLogo) {
-        const format = headerSettings.rightLogo.substring(headerSettings.rightLogo.indexOf('/') + 1, headerSettings.rightLogo.indexOf(';')).toUpperCase();
-        doc.addImage(headerSettings.rightLogo, format, pageWidth - 34, 8, 20, 20);
-    }
+    drawPdfLogos(doc, headerSettings, pageWidth);
 
     doc.setFontSize(14);
     doc.text(headerSettings.institutionSubtitle || "COLLEGE FOR ENGINEERING AND TECHNOLOGY", centerX, 22, { align: "center" });
@@ -818,7 +816,7 @@ export const generateConsolidatedPdf = async ({ assignments, halls, departments,
 
 
 // 3. generateFacultyDutyPdf
-export const generateFacultyDutyPdf = async ({ duties, examDate, examSession, examTime, headerSettings }) => {
+export const generateFacultyDutyPdf = async ({ duties, reserveFaculty = [], examDate, examSession, examTime, headerSettings }) => {
     const doc = new jsPDF('landscape', 'mm', 'a4');
     const pageWidth = doc.internal.pageSize.getWidth();
     const centerX = pageWidth / 2;
@@ -827,14 +825,7 @@ export const generateFacultyDutyPdf = async ({ duties, examDate, examSession, ex
     doc.setFont("helvetica", "bold");
     doc.text(headerSettings.institutionName || "SRM MADURAI", centerX, 15, { align: "center" });
 
-    if (headerSettings.leftLogo) {
-        const format = headerSettings.leftLogo.substring(headerSettings.leftLogo.indexOf('/') + 1, headerSettings.leftLogo.indexOf(';')).toUpperCase();
-        doc.addImage(headerSettings.leftLogo, format, 14, 8, 20, 20);
-    }
-    if (headerSettings.rightLogo) {
-        const format = headerSettings.rightLogo.substring(headerSettings.rightLogo.indexOf('/') + 1, headerSettings.rightLogo.indexOf(';')).toUpperCase();
-        doc.addImage(headerSettings.rightLogo, format, pageWidth - 34, 8, 20, 20);
-    }
+    drawPdfLogos(doc, headerSettings, pageWidth);
 
     doc.setFontSize(14);
     doc.text("FACULTY DUTY CHART", centerX, 30, { align: "center" });
@@ -875,14 +866,7 @@ export const generateSummaryReportPdf = async ({ assignments, departments, examD
     doc.setFont("helvetica", "bold");
     doc.text(headerSettings.institutionName || "SRM MADURAI", centerX, 15, { align: "center" });
 
-    if (headerSettings.leftLogo) {
-        const format = headerSettings.leftLogo.substring(headerSettings.leftLogo.indexOf('/') + 1, headerSettings.leftLogo.indexOf(';')).toUpperCase();
-        doc.addImage(headerSettings.leftLogo, format, 14, 8, 20, 20);
-    }
-    if (headerSettings.rightLogo) {
-        const format = headerSettings.rightLogo.substring(headerSettings.rightLogo.indexOf('/') + 1, headerSettings.rightLogo.indexOf(';')).toUpperCase();
-        doc.addImage(headerSettings.rightLogo, format, pageWidth - 34, 8, 20, 20);
-    }
+    drawPdfLogos(doc, headerSettings, pageWidth);
 
     doc.setFontSize(14);
     doc.text("EXAM SUMMARY REPORT", centerX, 30, { align: "center" });

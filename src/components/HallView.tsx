@@ -20,7 +20,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FileDown, Users, Check, X } from "lucide-react";
+import { FileDown, Users, Check, X, Loader2 } from "lucide-react";
+import { planApi } from "@/lib/planApi";
+import { downloadFromApi } from "@/lib/download";
 
 import {
   Select,
@@ -55,6 +57,13 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
   // Faculty State
   const [facultyAssigned, setFacultyAssigned] = useState<string[]>([]);
   const [allFaculty, setAllFaculty] = useState<User[]>([]);
+  // Reserve faculty of this plan (bottom of the bench layout, opposite the signature)
+  const [reserveFaculty, setReserveFaculty] = useState<{ _id: string; name: string; department?: string }[]>([]);
+  const [legacyWord, setLegacyWord] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const reserveText = reserveFaculty.length
+    ? reserveFaculty.map(r => `${r.name}${r.department ? ` (${r.department})` : ""}`).join(", ")
+    : "None assigned";
 
   const [settings, setSettings] = useState<HeaderSettings>({
     institutionName: "",
@@ -137,6 +146,7 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         // Fetch Faculty List
         const facultyList = await db.getAllFaculty();
         setAllFaculty(facultyList);
+        planApi.exportConfig().then(c => setLegacyWord(c.legacyWord)).catch(() => {});
 
         // Fetch settings
         const settingsRes = await fetch(`${API_URL}/settings`);
@@ -181,7 +191,8 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
         setExamTime(data.examTime || "");
 
         // Set Faculty Assignments
-        setFacultyAssigned(data.facultyAssigned || []);
+        setFacultyAssigned((data.facultyAssigned || []).map(String));
+        setReserveFaculty(data.reserveFaculty || []);
 
         // Build grid with department names
         setSeats(buildGrid(assignments));
@@ -303,28 +314,46 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
      * --------------------------------------------------------------------------- */
 
   const handleAddFaculty = async (facultyId: string) => {
-    if (!facultyAssigned.includes(facultyId)) {
-      const newAssigned = [...facultyAssigned, facultyId];
-      setFacultyAssigned(newAssigned);
-      try {
-        await db.updateHallFaculty(hallId, newAssigned);
-        toast({ title: "Faculty Added", description: "Assignment updated.", duration: 2000 });
-      } catch (err) {
-        setFacultyAssigned(facultyAssigned); // Revert
-        toast({ title: "Error", description: "Failed to update.", variant: "destructive" });
-      }
+    if (facultyAssigned.includes(facultyId)) return;
+    if (!examSessionId) {
+      toast({ title: "Select an exam session", description: "Faculty are assigned per exam session.", variant: "destructive" });
+      return;
+    }
+    try {
+      // Same-session conflicts are refused by the server; exceeding the department quota only warns
+      const state = await planApi.addHallFaculty("internal", examSessionId, hallId, facultyId);
+      setFacultyAssigned(state.halls.find(h => h.hallId === hallId)?.assigned || [...facultyAssigned, facultyId]);
+      toast({
+        title: "Faculty Added",
+        description: state.warnings?.length ? `Warning: ${state.warnings.join(" ")}` : "Assignment updated.",
+        duration: state.warnings?.length ? 6000 : 2000,
+      });
+    } catch (err: any) {
+      toast({ title: "Can't add faculty", description: err.message, variant: "destructive" });
     }
   };
 
   const handleRemoveFaculty = async (facultyId: string) => {
-    const newAssigned = facultyAssigned.filter(id => id !== facultyId);
-    setFacultyAssigned(newAssigned);
+    if (!examSessionId) return;
     try {
-      await db.updateHallFaculty(hallId, newAssigned);
+      const state = await planApi.removeHallFaculty("internal", examSessionId, hallId, facultyId);
+      setFacultyAssigned(state.halls.find(h => h.hallId === hallId)?.assigned || facultyAssigned.filter(id => id !== facultyId));
       toast({ title: "Faculty Removed", description: "Assignment updated.", duration: 2000 });
-    } catch (err) {
-      setFacultyAssigned(facultyAssigned); // Revert
-      toast({ title: "Error", description: "Failed to update.", variant: "destructive" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  };
+
+  // Excel / PDF bench layout of this hall (server export, includes logo and reserves)
+  const exportHallLayout = async (format: "xlsx" | "pdf") => {
+    if (!examSessionId || !hall) return;
+    setExporting(format);
+    try {
+      await downloadFromApi(`${API_URL}/exports/plan/internal/${examSessionId}/seating-plan?format=${format}&hallId=${hallId}`, `${hall.name}_Bench_Layout.${format}`);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -731,7 +760,11 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
       doc.setFont("helvetica", "italic");
       doc.text("* It should be filled carefully by Invigilators. Encircle the Absentees.", 14, footerY);
 
-      // Signature line
+      // Reserve Faculty (Left) & Signature line (Right)
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.text(`Reserve Faculty: ${reserveText}`, 14, footerY + 15, { maxWidth: pageWidth / 2 - 14 });
+
       doc.setFont("helvetica", "normal");
       doc.text("Name & Signature of the Hall Superintendent", pageWidth - 14, footerY + 15, { align: "right" });
 
@@ -778,7 +811,8 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           examDate: meta.date,
           examSession: meta.session,
           examTime: meta.time,
-          headerSettings: settings
+          headerSettings: settings,
+          reserveText
         });
 
         toast({
@@ -1018,8 +1052,18 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
 
       {!readOnly && (
         <div className="flex gap-2 mb-6 justify-end">
-          <Button variant="outline" onClick={exportConsolidatedWord}><FileDown className="mr-2 h-4 w-4" /> Consolidated Plan</Button>
-          <Button variant="outline" onClick={exportBenchLayoutWord}><FileDown className="mr-2 h-4 w-4" /> Bench Layout</Button>
+          {(["xlsx", "pdf"] as const).map(fmt => (
+            <Button key={fmt} variant="outline" onClick={() => exportHallLayout(fmt)} disabled={!examSessionId || exporting !== null}>
+              {exporting === fmt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
+              Bench Layout ({fmt === "xlsx" ? "Excel" : "PDF"})
+            </Button>
+          ))}
+          {legacyWord && (
+            <>
+              <Button variant="outline" onClick={exportConsolidatedWord}><FileDown className="mr-2 h-4 w-4" /> Consolidated (Word)</Button>
+              <Button variant="outline" onClick={exportBenchLayoutWord}><FileDown className="mr-2 h-4 w-4" /> Bench Layout (Word)</Button>
+            </>
+          )}
         </div>
       )}
 
@@ -1102,6 +1146,18 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
           );
         })}
 
+      </div>
+
+      {/* Bottom Layout Footer: Reserve Faculty (Left) & Superintendent Signature (Right) */}
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 pt-4 border-t border-slate-200 text-xs text-slate-600 bg-white p-4 rounded-xl border shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-indigo-950 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200">
+            Reserve Faculty: {reserveText}
+          </span>
+        </div>
+        <div className="text-right italic font-medium text-slate-500">
+          Name & Signature of the Hall Superintendent
+        </div>
       </div>
 
       {!readOnly && (

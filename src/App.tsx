@@ -16,6 +16,8 @@ import FacultyManagement from "./pages/admin/Faculty";
 import StudentsManagement from "./pages/admin/Students";
 import Settings from "./pages/admin/Settings";
 import AnnaUniversityPlanner from "./pages/admin/AnnaUniversityPlanner";
+import ReserveFaculty from "./pages/admin/ReserveFaculty";
+import DutySummary from "./pages/admin/DutySummary";
 import FacultyDashboard from "./pages/faculty/Dashboard";
 import StudentLookup from "./pages/StudentLookup";
 import NotFound from "./pages/NotFound";
@@ -66,6 +68,8 @@ const App = () => (
             <Route path="seating-plans" element={<SeatingPlans />} />
             <Route path="seating-plans/:id" element={<SeatingPlanDetails />} />
             <Route path="anna-university" element={<AnnaUniversityPlanner />} />
+            <Route path="reserve-faculty" element={<ReserveFaculty />} />
+            <Route path="duty-summary" element={<DutySummary />} />
             <Route path="exam-restrictions" element={<ExamRestrictions />} />
             <Route path="faculty" element={<FacultyManagement />} />
             <Route path="students" element={<StudentsManagement />} />

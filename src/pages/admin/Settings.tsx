@@ -5,6 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
+import { Switch } from "@/components/ui/switch";
+import { Plus, Trash2 } from "lucide-react";
+
+interface ExamCategory { key: string; label: string }
 
 const Settings = () => {
     const [loading, setLoading] = useState(true);
@@ -17,7 +21,10 @@ const Settings = () => {
         academicYear: '',
         examName: '',
         leftLogo: '',
-        rightLogo: ''
+        rightLogo: '',
+        absenteeWindowMinutes: 120,
+        useLegacyWordExport: false,
+        examCategories: [] as ExamCategory[]
     });
 
     useEffect(() => {
@@ -37,7 +44,10 @@ const Settings = () => {
                     academicYear: data.academicYear || '',
                     examName: data.examName || '',
                     leftLogo: data.leftLogo || '',
-                    rightLogo: data.rightLogo || ''
+                    rightLogo: data.rightLogo || '',
+                    absenteeWindowMinutes: data.absenteeWindowMinutes ?? 120,
+                    useLegacyWordExport: !!data.useLegacyWordExport,
+                    examCategories: data.examCategories || []
                 });
             }
         } catch (error) {
@@ -68,14 +78,38 @@ const Settings = () => {
         }
     };
 
+    const updateCategory = (index: number, field: keyof ExamCategory, value: string) =>
+        setSettings(prev => ({
+            ...prev,
+            examCategories: prev.examCategories.map((c, i) => i === index ? { ...c, [field]: value } : c)
+        }));
+
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
+        const minutes = Number(settings.absenteeWindowMinutes);
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+            toast({ title: "Invalid upload window", description: "Enter whole minutes between 1 and 1440.", variant: "destructive" });
+            return;
+        }
+        const categories = settings.examCategories
+            .map(c => ({ key: c.key.trim().toUpperCase().replace(/\s+/g, '_'), label: c.label.trim() }))
+            .filter(c => c.key);
+        if (new Set(categories.map(c => c.key)).size !== categories.length) {
+            toast({ title: "Duplicate category keys", description: "Each exam category needs a unique key.", variant: "destructive" });
+            return;
+        }
         setSaving(true);
         try {
             const res = await fetch(`${API_URL}/settings`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
+                body: JSON.stringify({
+                    ...settings,
+                    absenteeWindowMinutes: Number(settings.absenteeWindowMinutes),
+                    examCategories: settings.examCategories
+                        .map(c => ({ key: c.key.trim().toUpperCase().replace(/\s+/g, '_'), label: c.label.trim() || c.key.trim() }))
+                        .filter(c => c.key)
+                })
             });
 
             if (res.ok) {
@@ -109,7 +143,7 @@ const Settings = () => {
             <Card>
                 <CardHeader>
                     <CardTitle>Export Header Configuration</CardTitle>
-                    <CardDescription>These details will appear on all Word and PDF exports.</CardDescription>
+                    <CardDescription>These details and logos appear on every Excel and PDF export (and the legacy Word exports).</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={handleSave} className="space-y-4">
@@ -185,12 +219,16 @@ const Settings = () => {
                                 <Input
                                     id="leftLogo"
                                     type="file"
-                                    accept="image/*"
+                                    accept="image/png,image/jpeg"
                                     onChange={(e) => handleImageUpload(e, 'left')}
                                 />
                                 {settings.leftLogo && (
-                                    <div className="mt-2">
+                                    <div className="mt-2 flex items-center gap-3">
                                         <img src={settings.leftLogo} alt="Left Logo" className="h-16 object-contain" />
+                                        <Button type="button" variant="ghost" size="sm" className="text-red-600"
+                                            onClick={() => setSettings(prev => ({ ...prev, leftLogo: '' }))}>
+                                            Remove
+                                        </Button>
                                     </div>
                                 )}
                             </div>
@@ -200,14 +238,64 @@ const Settings = () => {
                                 <Input
                                     id="rightLogo"
                                     type="file"
-                                    accept="image/*"
+                                    accept="image/png,image/jpeg"
                                     onChange={(e) => handleImageUpload(e, 'right')}
                                 />
                                 {settings.rightLogo && (
-                                    <div className="mt-2">
+                                    <div className="mt-2 flex items-center gap-3">
                                         <img src={settings.rightLogo} alt="Right Logo" className="h-16 object-contain" />
+                                        <Button type="button" variant="ghost" size="sm" className="text-red-600"
+                                            onClick={() => setSettings(prev => ({ ...prev, rightLogo: '' }))}>
+                                            Remove
+                                        </Button>
                                     </div>
                                 )}
+                            </div>
+                        </div>
+
+                        <p className="text-xs text-muted-foreground">PNG or JPG. Large images are scaled down in exports; the aspect ratio is kept.</p>
+
+                        <div className="border-t pt-4 space-y-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="absenteeWindowMinutes">Default Absentee Upload Window (minutes after exam start)</Label>
+                                <Input
+                                    id="absenteeWindowMinutes"
+                                    type="number"
+                                    min={1}
+                                    max={1440}
+                                    value={settings.absenteeWindowMinutes}
+                                    onChange={(e) => setSettings(prev => ({ ...prev, absenteeWindowMinutes: e.target.value as any }))}
+                                    className="w-40"
+                                />
+                                <p className="text-xs text-muted-foreground">Used when a plan doesn't set its own window in the publish dialog.</p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Exam Categories</Label>
+                                <p className="text-xs text-muted-foreground">Used for exam schedules and the faculty duty history tabs. New categories appear automatically.</p>
+                                {settings.examCategories.map((c, i) => (
+                                    <div key={i} className="flex gap-2">
+                                        <Input value={c.key} onChange={(e) => updateCategory(i, 'key', e.target.value)} placeholder="Key (e.g. IAT3)" className="w-40" />
+                                        <Input value={c.label} onChange={(e) => updateCategory(i, 'label', e.target.value)} placeholder="Label (e.g. IAT 3)" />
+                                        <Button type="button" variant="ghost" size="icon" className="text-red-600"
+                                            onClick={() => setSettings(prev => ({ ...prev, examCategories: prev.examCategories.filter((_, j) => j !== i) }))}>
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                ))}
+                                <Button type="button" variant="outline" size="sm" className="gap-1"
+                                    onClick={() => setSettings(prev => ({ ...prev, examCategories: [...prev.examCategories, { key: '', label: '' }] }))}>
+                                    <Plus className="h-4 w-4" /> Add category
+                                </Button>
+                            </div>
+
+                            <div className="flex items-center justify-between rounded-md border p-3">
+                                <div>
+                                    <Label htmlFor="legacyWord">Use legacy Word exports</Label>
+                                    <p className="text-xs text-muted-foreground">Shows the old Word (.docx) download buttons again next to the Excel/PDF exports.</p>
+                                </div>
+                                <Switch id="legacyWord" checked={settings.useLegacyWordExport}
+                                    onCheckedChange={(v) => setSettings(prev => ({ ...prev, useLegacyWordExport: v }))} />
                             </div>
                         </div>
 

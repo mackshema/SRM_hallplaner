@@ -46,6 +46,10 @@ import { HeaderSettings } from "@/lib/exportBenchLayoutWord";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ExcelUploadHelper from "@/components/ExcelUploadHelper";
+import PlanActionsBar from "@/components/PlanActionsBar";
+import PlanStatusBadge from "@/components/PlanStatusBadge";
+import VacancyDialog from "@/components/VacancyDialog";
+import { planApi, PlanVacancies } from "@/lib/planApi";
 
 const SeatingPlans = () => {
 
@@ -69,6 +73,12 @@ const SeatingPlans = () => {
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [selectedSessionAssignments, setSelectedSessionAssignments] = useState<any[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+  // Legacy Word exports flag (Settings) and the vacancy prompt after generation
+  const [legacyWord, setLegacyWord] = useState(false);
+  const [vacancyPlans, setVacancyPlans] = useState<PlanVacancies[]>([]);
+  const [showVacancyDialog, setShowVacancyDialog] = useState(false);
+  const [staffingRefresh, setStaffingRefresh] = useState(0);
+  useEffect(() => { planApi.exportConfig().then(c => setLegacyWord(c.legacyWord)).catch(() => {}); }, []);
 
   // Follow ?sessionId= changes made after mount (e.g. browser back/forward).
   // The initial load is handled by the mount effect below.
@@ -446,8 +456,11 @@ const SeatingPlans = () => {
              fetchSeatingPlan(sessionsData[sessionsData.length - 1]._id);
           }
 
-         // Show shortage popup if faculty couldn't be fully allocated
-         if (data.shortage && data.allocationWarnings && data.allocationWarnings.length > 0) {
+         // Halls left short by the department quota: show the vacancy prompt
+         if (data.planVacancies && data.planVacancies.length > 0) {
+           setVacancyPlans(data.planVacancies.map((p: any) => ({ ...p, planId: String(p.planId) })));
+           setShowVacancyDialog(true);
+         } else if (data.shortage && data.allocationWarnings && data.allocationWarnings.length > 0) {
            setAllocationWarnings(data.allocationWarnings);
            setFacultySuggestions(data.facultySuggestions || []);
            setTempDemandFacultyIds([]);
@@ -759,9 +772,7 @@ const SeatingPlans = () => {
                                </h3>
                                <p className="text-sm font-medium text-slate-500">{plan.examSession} Session</p>
                             </div>
-                            <div className={`px-2 py-1 rounded text-xs font-bold ${plan.status === 'FINAL' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                               {plan.status || 'DRAFT'}
-                            </div>
+                            <PlanStatusBadge status={plan.status} publishAt={plan.publish_at} isPublished={plan.isPublished} />
                          </div>
                          <div className="flex items-center justify-between mt-4">
                            <span className="text-slate-500 text-sm font-medium">Internal Evaluation</span>
@@ -795,86 +806,41 @@ const SeatingPlans = () => {
                  </div>
                  <div className="flex gap-2">
                    <Button variant="outline" onClick={() => setSelectedSessionId("")}>Back to Sessions</Button>
-                   <Button onClick={exportConsolidatedPlan} className="bg-primary text-primary-foreground shadow-sm">
-                     Download Consolidated
-                   </Button>
-                   <Button variant="outline" onClick={() => downloadHallLayout()} disabled={downloadingLayout !== null || occupiedHalls.length === 0}>
-                     {downloadingLayout === "all" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
-                     All Hall Layouts (.zip)
-                   </Button>
-                   <Button onClick={() => downloadFromApi(`${API_URL}/export/full-exam/${selectedSessionId}`, 'Full_Exam_Package.zip').catch((e) => toast({ title: "Download Error", description: e.message, variant: "destructive" }))} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
-                     Download Full Package (Docx + Pdf)
-                   </Button>
+                   {/* Old Word exports, only when Settings -> "Use legacy Word exports" is on */}
+                   {legacyWord && (
+                     <>
+                       <Button variant="outline" onClick={exportConsolidatedPlan}>
+                         Consolidated (legacy PDF)
+                       </Button>
+                       <Button variant="outline" onClick={() => downloadHallLayout()} disabled={downloadingLayout !== null || occupiedHalls.length === 0}>
+                         {downloadingLayout === "all" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                         Hall Layouts (Word .zip)
+                       </Button>
+                       <Button variant="outline" onClick={() => downloadFromApi(`${API_URL}/export/full-exam/${selectedSessionId}`, 'Full_Exam_Package.zip').catch((e) => toast({ title: "Download Error", description: e.message, variant: "destructive" }))}>
+                         Full Package (Word + PDF)
+                       </Button>
+                     </>
+                   )}
                  </div>
                </div>
-               <div className="rounded-xl border bg-blue-50/50 p-5 flex flex-wrap justify-between items-center gap-4">
-                  <div className="flex gap-8 items-center">
-                    <div>
-                      <span className="text-xs text-slate-500 font-semibold uppercase block mb-2 tracking-wider">Plan Status</span>
-                      <div className="flex items-center gap-2">
-                         {selectedSession?.status === "FINAL" ? <Lock className="h-4 w-4 text-green-600"/> : <Unlock className="h-4 w-4 text-yellow-600"/>}
-                         <span className={`px-2 py-1 rounded text-sm font-bold ${selectedSession?.status === 'FINAL' ? 'bg-green-200 text-green-800' : 'bg-yellow-200 text-yellow-800'}`}>
-                           {selectedSession?.status || "DRAFT"}
-                         </span>
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-xs text-slate-500 font-semibold uppercase block mb-2 tracking-wider">Visibility</span>
-                      <div className="flex items-center gap-2">
-                         {selectedSession?.isPublished ? <Eye className="h-4 w-4 text-blue-600"/> : <EyeOff className="h-4 w-4 text-slate-400"/>}
-                         <span className={`px-2 py-1 rounded text-sm font-bold ${selectedSession?.isPublished ? 'bg-blue-200 text-blue-800' : 'bg-slate-200 text-slate-700'}`}>
-                           {selectedSession?.isPublished ? "PUBLISHED" : "HIDDEN"}
-                         </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    {selectedSession?.status !== "FINAL" ? (
-                      <Button className="bg-green-600 hover:bg-green-700 text-white shadow-sm" onClick={handleFinalizeSession}>
-                        <CheckCircle2 className="mr-2 h-4 w-4" /> Finalize Plan
-                      </Button>
-                    ) : (
-                      <>
-                        {!selectedSession?.isPublished ? (
-                          <Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm" onClick={async () => {
-                            try {
-                              const updated = await db.updateExamSession(selectedSessionId, { isPublished: true });
-                              setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
-                              toast({ title: "Published", description: "Plan published." });
-                            } catch (err: any) {
-                              toast({ title: "Error", description: err.message, variant: "destructive" });
-                            }
-                          }}>
-                            Publish to Dashboards
-                          </Button>
-                        ) : (
-                          <Button variant="outline" className="border-red-600 text-red-700 hover:bg-red-50" onClick={async () => {
-                            try {
-                              const updated = await db.updateExamSession(selectedSessionId, { isPublished: false });
-                              setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
-                              toast({ title: "Unpublished", description: "Plan hidden." });
-                            } catch (err: any) {
-                              toast({ title: "Error", description: err.message, variant: "destructive" });
-                            }
-                          }}>
-                            Unpublish Plan
-                          </Button>
-                        )}
-                        <Button variant="outline" className="border-yellow-600 text-yellow-700 hover:bg-yellow-50" onClick={async () => {
-                          try {
-                            const updated = await db.unfinalizeExamSession(selectedSessionId);
-                            setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
-                            toast({ title: "Unlocked", description: "Reverted to DRAFT." });
-                          } catch (err: any) {
-                            toast({ title: "Error", description: err.message, variant: "destructive" });
-                          }
-                        }}>
-                          Unlock / Edit Plan
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
+               {selectedSession && (
+                 <PlanActionsBar
+                   planType="internal"
+                   plan={selectedSession as any}
+                   refreshKey={staffingRefresh}
+                   onPlanUpdated={(updated) => setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s))}
+                   onFinalize={handleFinalizeSession}
+                   onUnlock={async () => {
+                     try {
+                       const updated = await db.unfinalizeExamSession(selectedSessionId);
+                       setExamSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+                       toast({ title: "Unlocked", description: "Reverted to DRAFT." });
+                     } catch (err: any) {
+                       toast({ title: "Error", description: err.message, variant: "destructive" });
+                     }
+                   }}
+                 />
+               )}
 
                 <div className="border rounded-md bg-white">
                   <Tabs defaultValue="halls" className="w-full">
@@ -920,10 +886,28 @@ const SeatingPlans = () => {
                                  <TableCell className="text-slate-500 text-sm">{hall.rows} rows × {hall.columns} cols</TableCell>
                                  <TableCell className="text-right">
                                    <div className="flex justify-end gap-2">
-                                     <Button variant="outline" size="sm" onClick={() => downloadHallLayout(hall._id, hall.name)} disabled={downloadingLayout !== null}>
-                                       {downloadingLayout === hall._id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
-                                       Layout (.docx)
-                                     </Button>
+                                     {(["xlsx", "pdf"] as const).map(fmt => (
+                                       <Button key={fmt} variant="outline" size="sm" disabled={downloadingLayout !== null}
+                                         onClick={async () => {
+                                           setDownloadingLayout(`${hall._id}-${fmt}`);
+                                           try {
+                                             await downloadFromApi(`${API_URL}/exports/plan/internal/${selectedSessionId}/seating-plan?format=${fmt}&hallId=${hall._id}`, `${hall.name}_Bench_Layout.${fmt}`);
+                                           } catch (e: any) {
+                                             toast({ title: "Download Error", description: e.message, variant: "destructive" });
+                                           } finally {
+                                             setDownloadingLayout(null);
+                                           }
+                                         }}>
+                                         {downloadingLayout === `${hall._id}-${fmt}` ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                                         Layout ({fmt === "xlsx" ? "Excel" : "PDF"})
+                                       </Button>
+                                     ))}
+                                     {legacyWord && (
+                                       <Button variant="outline" size="sm" onClick={() => downloadHallLayout(hall._id, hall.name)} disabled={downloadingLayout !== null}>
+                                         {downloadingLayout === hall._id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                                         Layout (Word)
+                                       </Button>
+                                     )}
                                      <Button variant="outline" size="sm" onClick={() => handleViewHall(hall._id)}>
                                        <View className="h-4 w-4 mr-2" /> View &amp; Configure Hall
                                      </Button>
@@ -995,7 +979,7 @@ const SeatingPlans = () => {
               Faculty Allocation Shortage
             </AlertDialogTitle>
             <AlertDialogDescription>
-              The system could not fulfill all faculty requirements based on existing rules (e.g., max 4 duties/week, no continuous sessions).
+              The system could not fulfill all faculty requirements based on existing rules (e.g., department quota, max 4 duties/week, no continuous sessions).
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -1106,6 +1090,16 @@ const SeatingPlans = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <VacancyDialog
+        open={showVacancyDialog}
+        onClose={() => setShowVacancyDialog(false)}
+        plans={vacancyPlans}
+        onChanged={() => {
+          setStaffingRefresh(n => n + 1);
+          db.getExamSessions().then(setExamSessions).catch(() => {});
+        }}
+      />
 
       <AlertDialog open={showDeleteSessionDialog} onOpenChange={setShowDeleteSessionDialog}>
         <AlertDialogContent>

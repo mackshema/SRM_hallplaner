@@ -32,6 +32,29 @@ const settingsSchema = new mongoose.Schema({
     rightLogo: {
         type: String,
         default: ''
+    },
+    // Minutes after exam start during which invigilators can upload absentees.
+    // Plans can override it (absentee_window_minutes).
+    absenteeWindowMinutes: {
+        type: Number,
+        default: 120,
+        min: 1
+    },
+    // Exam categories for schedules and the faculty duty history tabs.
+    // Add a category here and it appears in the UI without code changes.
+    examCategories: {
+        type: [{ _id: false, key: { type: String, trim: true }, label: { type: String, trim: true } }],
+        default: () => [
+            { key: 'IAT1', label: 'IAT 1' },
+            { key: 'IAT2', label: 'IAT 2' },
+            { key: 'MODEL', label: 'Model' },
+            { key: 'ANNA', label: 'Anna University Exams' }
+        ]
+    },
+    // Flag to switch exports back to the old Word (.docx) documents.
+    useLegacyWordExport: {
+        type: Boolean,
+        default: false
     }
 }, { timestamps: true });
 

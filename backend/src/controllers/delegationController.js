@@ -5,6 +5,8 @@ import Hall from "../models/Hall.js";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
+import { plansForSlot } from "../services/planService.js";
+import { onPlanChanged } from "../services/planLifecycle.js";
 
 dotenv.config();
 
@@ -190,6 +192,11 @@ export const facultyAccept = async (req, res) => {
             },
             { $set: { facultyId: request.replacementFacultyId._id } }
         );
+
+        // Keep duty history / summaries in step with the moved duty
+        for (const plan of await plansForSlot(request.examDate, request.examSession)) {
+            await onPlanChanged(plan.planType, plan.planId, { reason: "duty delegated" });
+        }
 
         // Transfer Duty in Hall.facultyAssigned
         const halls = await Hall.find({

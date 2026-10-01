@@ -6,6 +6,14 @@ import User from '../models/User.js';
 import FacultyDuty from '../models/FacultyDuty.js';
 import { deleteSessionDuties, compareSessions, previousSession, dutiesFromAssignments } from '../utils/facultyDuties.js';
 import { timetableEntryFromRow, validateTimetable, timetableErrorResponse, applyTimetable, parseRawTimetableLines, escapeRegex } from '../utils/timetableImport.js';
+import ReserveFaculty from '../models/ReserveFaculty.js';
+import { allocateFaculty, vacancyMessage } from '../utils/facultyAllocation.js';
+import { isLocked } from '../utils/planStatus.js';
+import { totalDutyCounts, reservedFacultyIds } from '../services/facultyPickerService.js';
+import { normalizePlan, deletePlanDuties } from '../services/planService.js';
+import { autoPromoteDuePlans, onPlanChanged, afterPlansDeleted } from '../services/planLifecycle.js';
+
+import { publishPlan, cancelSchedule, unpublishPlan, sendError } from '../services/publishService.js';
 import { exec } from 'child_process';
 import path from 'path';
 import { mkdirSync, existsSync, readdirSync, statSync, rmSync } from 'fs';
@@ -96,97 +104,62 @@ const runFacultyAllocation = async (examDate, session, hallsWithStudents, demand
     weeklyDutyCount[id] = (weeklyDutyCount[id] || 0) + 1;
   });
 
-  // Helper to check constraints
-  const isFacultyAvailable = (faculty, hall, currentAssignments) => {
+  // Hard constraint: reserves of this slot can't also invigilate (and vice versa)
+  const reservedSet = await reservedFacultyIds(examDate, session);
+
+  // Hard rules for this session. The department limit is a per-run quota
+  // applied by allocateFaculty (replaces the fixed "max 2 per hall").
+  const isFacultyAvailable = (faculty) => {
     const fId = faculty._id.toString();
     const isDemand = demandFacultyIds.includes(fId);
 
-    // 1. Already assigned to this hall (in current batch)
-    if (currentAssignments.includes(fId)) return false;
+    // Same Session Duplicate / Reserve (HARD CONSTRAINT)
+    if (sameSessionFacultySet.has(fId) || reservedSet.has(fId)) return false;
 
-    // 2. Department Cap: Max 2 from same dept per hall
-    const sameDeptCount = currentAssignments.filter(id => {
-      const f = allFaculty.find(fac => fac._id.toString() === id);
-      return f && f.department === faculty.department;
-    }).length;
-    if (sameDeptCount >= 2 && !isDemand) return false;
-
-    // 3. Same Session Duplicate (HARD CONSTRAINT)
-    if (sameSessionFacultySet.has(fId)) return false;
-
-    // 4. No Continuous Participation (Unless Demand)
+    // No Continuous Participation (Unless Demand)
     if (prevSessionFacultySet.has(fId) && !isDemand) return false;
 
-    // 5. Weekly Limit: Max 4 duties (Unless Demand)
-    if (!isDemand) {
-      const count = weeklyDutyCount[fId] || 0;
-      if (count >= 4) return false;
-    }
+    // Weekly Limit: Max 4 duties (Unless Demand)
+    if (!isDemand && (weeklyDutyCount[fId] || 0) >= 4) return false;
 
     return true;
   };
 
-  // Shuffle faculty for randomization
-  let shuffledFaculty = [...allFaculty];
-  for (let i = shuffledFaculty.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffledFaculty[i], shuffledFaculty[j]] = [shuffledFaculty[j], shuffledFaculty[i]];
-  }
+  const hallDocs = await Hall.find({ _id: { $in: hallsWithStudents } }).lean();
+  const hallById = new Map(hallDocs.map(h => [h._id.toString(), h]));
+  const hallsToStaff = hallsWithStudents
+    .map(id => hallById.get(id.toString()))
+    .filter(Boolean)
+    .map(h => ({ hallId: h._id, hallName: h.name, required: h.facultyRequired || 1 }));
 
-  const facultyAssignments = [];
-  const globalAssignedIds = new Set();
-  const allocationWarnings = [];
-  let shortage = false;
+  const allocation = allocateFaculty({
+    halls: hallsToStaff,
+    faculty: allFaculty,
+    isEligible: isFacultyAvailable,
+    dutyCounts: await totalDutyCounts(),
+    demandIds: demandFacultyIds,
+  });
 
-  for (const hallId of hallsWithStudents) {
-    const hall = await Hall.findById(hallId).lean();
-    if (!hall) continue;
-
-    const required = hall.facultyRequired || 1;
-    const hallAssignedIds = [];
-
-    for (let i = 0; i < required; i++) {
-      let selected = null;
-      for (const faculty of shuffledFaculty) {
-        const fId = faculty._id.toString();
-        if (globalAssignedIds.has(fId)) continue;
-
-        if (isFacultyAvailable(faculty, hall, hallAssignedIds)) {
-          selected = faculty;
-          break;
-        }
-      }
-
-      if (selected) {
-        const fId = selected._id.toString();
-        hallAssignedIds.push(fId);
-        globalAssignedIds.add(fId);
-      } else {
-        shortage = true;
-        allocationWarnings.push(`Hall ${hall.name}: Could not find enough faculty (Need ${required}, got ${hallAssignedIds.length})`);
-      }
-    }
-
-    facultyAssignments.push({
-      hallId: hall._id,
-      facultyIds: hallAssignedIds
-    });
-  }
+  const allocationWarnings = allocation.vacancies.map(v => `Hall ${v.hallName}: Could not find enough faculty (Need ${v.required}, got ${v.assigned})`);
+  const shortage = allocation.vacancies.length > 0;
 
   // Suggest all faculty who are free in this session (ignoring soft limits like continuous/weekly caps)
   let facultySuggestions = [];
   if (shortage) {
+    const assignedIds = new Set(allocation.facultyAssignments.flatMap(a => a.facultyIds));
     facultySuggestions = allFaculty
-      .filter(f => !globalAssignedIds.has(f._id.toString())) // Not already assigned in this generation run
-      .filter(f => !sameSessionFacultySet.has(f._id.toString())) // No duplicate duty in this same session
+      .filter(f => !assignedIds.has(f._id.toString())) // Not already assigned in this generation run
+      .filter(f => !sameSessionFacultySet.has(f._id.toString()) && !reservedSet.has(f._id.toString())) // No duplicate duty in this same session
       .map(f => ({ id: f._id, name: f.name, department: f.department }));
   }
 
   return {
-    facultyAssignments,
+    facultyAssignments: allocation.facultyAssignments,
     shortage,
     allocationWarnings,
-    facultySuggestions
+    facultySuggestions,
+    vacancies: allocation.vacancies,
+    departmentQuota: allocation.quota
   };
 };
 
@@ -277,9 +250,10 @@ export const uploadTimetableRaw = async (req, res) => {
 
     const matchedSubjects = await applyTimetable(AnnaExamData, updates);
     // NEW: Clear old plans as requested by user
-    const oldPlans = await AnnaSeating.find({}, 'examDate session').lean();
+    const oldPlans = await AnnaSeating.find({}, 'examDate session examScheduleId').lean();
     await deleteSessionDuties(oldPlans.map(p => ({ examDate: p.examDate, examSession: p.session })));
     await AnnaSeating.deleteMany({});
+    await afterPlansDeleted('anna', oldPlans);
 
     // Automatically trigger fresh generation
     const generationResult = await runAnnaGeneration();
@@ -348,9 +322,10 @@ export const uploadTimetable = async (req, res) => {
     const matchedCount = await applyTimetable(AnnaExamData, updates, { caseInsensitive: true });
 
     // NEW: Clear old plans as requested by user
-    const oldPlans = await AnnaSeating.find({}, 'examDate session').lean();
+    const oldPlans = await AnnaSeating.find({}, 'examDate session examScheduleId').lean();
     await deleteSessionDuties(oldPlans.map(p => ({ examDate: p.examDate, examSession: p.session })));
     await AnnaSeating.deleteMany({});
+    await afterPlansDeleted('anna', oldPlans);
 
     // Automatically trigger fresh generation
     const generationResult = await runAnnaGeneration();
@@ -512,8 +487,13 @@ export const generateAnnaSeating = async (req, res) => {
     let studentQueue = [...students];
     const seatWarnings = []; // AL-03: silent warning collector
 
-    // Delete existing plan mapping for this date/session to overwrite
+    // Delete existing plan mapping for this date/session to overwrite (drafts only)
+    const replaced = await AnnaSeating.find({ examDate, session }, 'examDate session status examScheduleId').lean();
+    if (replaced.some(p => isLocked(p.status))) {
+      return res.status(400).json({ error: "This plan is finalized. Unlock it before regenerating." });
+    }
     await AnnaSeating.deleteMany({ examDate, session });
+    await afterPlansDeleted('anna', replaced);
 
     for (const hall of orderedHalls) {
       if (studentQueue.length === 0) break;
@@ -655,7 +635,7 @@ export const generateAnnaSeating = async (req, res) => {
     const hallsWithStudents = [...new Set(allAssignments.map(a => a.hallId.toString()))];
     const demandFacultyIds = req.body.demandFacultyIds || [];
     // Other draft plans' invigilators count towards the duty rules too
-    const draftPlans = await AnnaSeating.find({ status: { $ne: 'FINAL' } }).select('examDate session facultyAssignments').lean();
+    const draftPlans = await AnnaSeating.find({ status: { $nin: ['FINAL', 'SCHEDULED', 'PUBLISHED'] } }).select('examDate session facultyAssignments').lean();
     const draftDuties = draftPlans.flatMap(p => dutiesFromAssignments(p.examDate, p.session, p.facultyAssignments));
     const facultyAllocationResult = await runFacultyAllocation(examDate, session, hallsWithStudents, demandFacultyIds, draftDuties);
 
@@ -686,8 +666,14 @@ export const generateAnnaSeating = async (req, res) => {
       allocationResult: {
         shortage: facultyAllocationResult.shortage,
         warnings: facultyAllocationResult.allocationWarnings,
-        suggestions: facultyAllocationResult.facultySuggestions
-      }
+        suggestions: facultyAllocationResult.facultySuggestions,
+        vacancies: facultyAllocationResult.vacancies,
+        vacancyMessage: vacancyMessage(facultyAllocationResult.vacancies),
+        departmentQuota: facultyAllocationResult.departmentQuota
+      },
+      planVacancies: facultyAllocationResult.vacancies.length
+        ? [{ planType: 'anna', planId: newSeating._id, examDate, session, vacancies: facultyAllocationResult.vacancies }]
+        : []
     });
   } catch (err) {
     console.error(err);
@@ -697,6 +683,8 @@ export const generateAnnaSeating = async (req, res) => {
 
 export const getAllSeatingPlans = async (req, res) => {
   try {
+    // Read-time check: SCHEDULED plans whose publish time passed become PUBLISHED
+    await autoPromoteDuePlans();
     const plans = await AnnaSeating.find({}).sort({ examDate: 1, session: 1 });
     res.json(plans);
   } catch (err) {
@@ -711,6 +699,7 @@ export const getSeatingPlan = async (req, res) => {
     if (!examDate || !session) {
       return res.status(400).json({ error: "examDate and session required" });
     }
+    await autoPromoteDuePlans();
     const plan = await AnnaSeating.findOne({ examDate, session });
     res.json(plan || { assignments: [] });
   } catch (err) {
@@ -719,77 +708,100 @@ export const getSeatingPlan = async (req, res) => {
   }
 };
 
+/** Creates the FacultyDuty rows of a plan that is being finalized. */
+const createPlanDuties = async (plan) => {
+  const faMap = new Map(
+    (plan.facultyAssignments || []).map(fa => [fa.hallId.toString(), fa.facultyIds])
+  );
+  const hallIds = [...new Set(plan.assignments.map(a => a.hallId.toString()))];
+  for (const hId of hallIds) {
+    for (const fId of faMap.get(hId) || []) {
+      // Upsert: one duty per faculty per slot (unique index), safe on repeat
+      await FacultyDuty.updateOne(
+        { facultyId: fId, examDate: plan.examDate, examSession: plan.session },
+        { $set: { hallId: hId, examTime: resolveExamTime(plan.session, null) } },
+        { upsert: true }
+      );
+      await User.findByIdAndUpdate(fId, { lastDutyDate: new Date() });
+    }
+  }
+};
+
+/**
+ * Status changes for an Anna plan (DRAFT -> FINAL -> SCHEDULED -> PUBLISHED).
+ * Body: { examDate, session, status?, isPublished?, publish_at?, startTime?, endTime?, absentee_window_minutes? }
+ *
+ *  - publish_at present (and status not FINAL/DRAFT): publish now / schedule (publishService)
+ *  - status DRAFT: unlock; the plan's duties are removed
+ *  - status FINAL from DRAFT: finalize; duties are created once
+ *  - status FINAL from SCHEDULED/PUBLISHED: cancel schedule / unpublish (duties kept)
+ *  - status FINAL + isPublished true: legacy "publish" flag, still honoured
+ */
 export const updateStatus = async (req, res) => {
   try {
-    const { examDate, session, status, isPublished } = req.body;
+    const { examDate, session, status, isPublished, publish_at } = req.body;
     if (!examDate || !session) {
       return res.status(400).json({ error: "examDate and session required" });
     }
-    const updatePayload = {};
-    if (status !== undefined) updatePayload.status = status;
-    if (isPublished !== undefined) updatePayload.isPublished = isPublished;
-    
-    const before = await AnnaSeating.findOne({ examDate, session }).select('status').lean();
-    const wasFinal = before?.status === "FINAL";
 
-    const plan = await AnnaSeating.findOneAndUpdate(
-      { examDate, session },
-      { $set: updatePayload },
-      { new: true }
-    );
+    const current = await AnnaSeating.findOne({ examDate, session });
+    if (!current) return res.status(404).json({ error: "Seating plan not found" });
+    const planId = current._id;
+    const from = current.status || "DRAFT";
 
-    // Leaving FINAL: remove this plan's duties so it can be finalized again cleanly
-    if (plan && wasFinal && status !== undefined && status !== "FINAL") {
-      await FacultyDuty.deleteMany({ examDate, examSession: session });
+    // Publish / schedule through the shared publish rules
+    if (publish_at !== undefined && status !== "FINAL" && status !== "DRAFT") {
+      return res.json(await publishPlan("anna", planId, req.body));
     }
 
-    // Becoming FINAL: create FacultyDuties for dashboard (only once, on the transition)
-    if (status === "FINAL" && plan && !wasFinal) {
-       const newDuties = [];
-       const faMap = new Map(
-         (plan.facultyAssignments || []).map(fa => [fa.hallId.toString(), fa.facultyIds])
-       );
-
-       const hallIds = [...new Set(plan.assignments.map(a => a.hallId.toString()))];
-       for (const hId of hallIds) {
-         const assignedFaculty = faMap.get(hId) || [];
-         if (assignedFaculty.length > 0) {
-           for (const fId of assignedFaculty) {
-             newDuties.push({
-               facultyId: fId,
-               hallId: hId,
-               examDate,
-               examSession: session,
-               examTime: resolveExamTime(session, null) // AL-02: session-aware time
-             });
-
-             await User.findByIdAndUpdate(fId, {
-               lastDutyDate: new Date(),
-             });
-           }
-         }
-       }
-       if (newDuties.length > 0) {
-         await FacultyDuty.insertMany(newDuties);
-       }
+    if (status === "DRAFT") {
+      if (isLocked(from)) await deletePlanDuties(normalizePlan("anna", current));
+      const plan = await AnnaSeating.findByIdAndUpdate(planId,
+        { $set: { status: "DRAFT", isPublished: false, publish_at: null } }, { new: true });
+      await onPlanChanged("anna", planId, { reason: "plan unlocked for editing" });
+      return res.json(plan);
     }
 
-    if (!plan) return res.status(404).json({ error: "Seating plan not found" });
-    res.json(plan);
+    if (status === "FINAL") {
+      if (from === "SCHEDULED") return res.json(await cancelSchedule("anna", planId));
+      if (from === "PUBLISHED") return res.json(await unpublishPlan("anna", planId));
+
+      const update = { status: "FINAL" };
+      if (isPublished !== undefined) update.isPublished = isPublished;
+      if (from !== "FINAL") update.finalizedAt = new Date();
+      const plan = await AnnaSeating.findByIdAndUpdate(planId, { $set: update }, { new: true });
+      // Becoming FINAL: create the duties (only on the transition)
+      if (from !== "FINAL") await createPlanDuties(plan);
+      await onPlanChanged("anna", planId, { reason: from !== "FINAL" ? "plan finalized" : "plan updated" });
+      return res.json(plan);
+    }
+
+    // Visibility flag only
+    if (isPublished !== undefined) {
+      const plan = await AnnaSeating.findByIdAndUpdate(planId, { $set: { isPublished } }, { new: true });
+      await onPlanChanged("anna", planId, { reason: "plan updated" });
+      return res.json(plan);
+    }
+
+    return res.status(400).json({ error: "Nothing to update." });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    sendError(res, err, "Failed to update plan status");
   }
 };
+
 
 export const deleteSeatingPlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const plan = await AnnaSeating.findByIdAndDelete(id);
-    if (!plan) return res.status(404).json({ error: "Plan not found" });
+    const existing = await AnnaSeating.findById(id);
+    if (!existing) return res.status(404).json({ error: "Plan not found" });
 
-    // Also remove associated faculty duties if they were finalized
-    await FacultyDuty.deleteMany({ examDate: plan.examDate, examSession: plan.session });
+    // Also remove this plan's faculty duties and reserves (not the Internal plan's in the same slot)
+    const plan = normalizePlan("anna", existing);
+    await deletePlanDuties(plan);
+    await ReserveFaculty.deleteMany({ $or: [{ planId: id }, { planId: null, examType: "Anna", examDate: plan.examDate, examSession: plan.session }] });
+    await AnnaSeating.findByIdAndDelete(id);
+    await onPlanChanged("anna", id, { reason: "plan deleted", previousScheduleId: plan.examScheduleId });
 
     res.json({ success: true, message: "Plan deleted successfully" });
   } catch (err) {
@@ -832,11 +844,12 @@ async function runAnnaGeneration(maxPerHall = 25, maxSpb = 2, demandFacultyIds =
   // Duties handed out in this run (and in existing draft plans). They aren't
   // saved as FacultyDuty until finalize, but the duty rules must still count them.
   const runDuties = [];
+  const planVacancies = []; // halls left without enough invigilators, per plan
 
   for (const { examDate, session } of uniqueSessions) {
      const existing = await AnnaSeating.findOne({ examDate, session });
      if (existing) {
-        if (existing.status !== 'FINAL') {
+        if (!isLocked(existing.status)) {
           runDuties.push(...dutiesFromAssignments(examDate, session, existing.facultyAssignments));
         }
         skippedCount++;
@@ -969,6 +982,9 @@ async function runAnnaGeneration(maxPerHall = 25, maxSpb = 2, demandFacultyIds =
      await newSeating.save();
      runDuties.push(...dutiesFromAssignments(examDate, session, facultyAllocationResult.facultyAssignments));
      generatedCount++;
+     if (facultyAllocationResult.vacancies.length) {
+       planVacancies.push({ planType: 'anna', planId: newSeating._id, examDate, session, vacancies: facultyAllocationResult.vacancies });
+     }
 
      if (facultyAllocationResult.shortage) {
        hasShortage = true;
@@ -987,12 +1003,14 @@ async function runAnnaGeneration(maxPerHall = 25, maxSpb = 2, demandFacultyIds =
       .map(f => ({ id: f._id, name: f.name, department: f.department }));
   }
 
-  return { 
-    count: generatedCount, 
+  return {
+    count: generatedCount,
     skipped: skippedCount,
     shortage: hasShortage,
     allocationWarnings: globalAllocationWarnings,
-    facultySuggestions
+    facultySuggestions,
+    planVacancies,
+    vacancyMessage: vacancyMessage(planVacancies.flatMap(p => p.vacancies))
   };
 }
 

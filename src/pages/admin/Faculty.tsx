@@ -28,6 +28,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Search } from "lucide-react";
+import FacultyDutyHistory from "@/components/FacultyDutyHistory";
 
 // ─── Designation hierarchy config ────────────────────────────────────────────
 // Edit this ONE place to adjust rank order. Lower index = higher rank.
@@ -45,8 +46,30 @@ const getDesignationRank = (d?: string) =>
 
 const FacultyManagement = () => {
   const [faculty, setFaculty] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
   // sort state: null = default order, 'asc' = top rank first, 'desc' = bottom rank first
   const [designationSort, setDesignationSort] = useState<null | 'asc' | 'desc'>(null);
+
+  // Dialog States
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isViewOpen, setIsViewOpen] = useState(false);
+
+  // Selection State
+  const [selectedFaculty, setSelectedFaculty] = useState<User | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Form Data
+  const [formData, setFormData] = useState({
+    name: "",
+    department: "",
+    designation: "",
+    facultyEmail: "",
+    hodEmail: "",
+  });
+
+  // Saved (finalized) hall duties, for the faculty-hall allocation report
+  const [allDuties, setAllDuties] = useState<any[]>([]);
   const [settings, setSettings] = useState({
     institutionName: "",
     institutionSubtitle: "",
@@ -69,6 +92,9 @@ const FacultyManagement = () => {
           const settingsData = await settingsRes.json();
           setSettings(settingsData);
         }
+
+        const dutiesRes = await fetch(`${API_URL}/seating/duties/all`);
+        if (dutiesRes.ok) setAllDuties(await dutiesRes.json());
       } catch (error) {
         console.error("Error fetching initial data:", error);
       } finally {
@@ -256,16 +282,12 @@ const FacultyManagement = () => {
       doc.text(`Generated on: ${currentDateTime}`, pageWidth - 14, 65, { align: "right" });
 
       const tableData = faculty.map(member => {
-        const assignedHalls = getAssignedHalls(member);
-        const hallNames = assignedHalls.length > 0
-          ? assignedHalls.map(h => {
-            // Find hall in allHalls to get exam metadata
-            const fullHall = halls.find((ah: any) => ah._id === h._id || ah.name === h.name);
-            const examInfo = fullHall && (fullHall.examDate || fullHall.examSession || fullHall.examTime)
-              ? ` (${fullHall.examDate || ""} ${fullHall.examSession || ""} ${fullHall.examTime || ""})`
-              : "";
-            return h.name + examInfo;
-          }).join(", ")
+        const mId = String(member._id || member.id);
+        const duties = allDuties
+          .filter(d => String(d.facultyId?._id || d.facultyId) === mId)
+          .sort((a, b) => `${a.examDate}${a.examSession}`.localeCompare(`${b.examDate}${b.examSession}`));
+        const hallNames = duties.length > 0
+          ? duties.map(d => `${d.hallId?.name || "Hall"} (${d.examDate} ${d.examSession})`).join(", ")
           : "None";
         return [
           member.name,
@@ -532,7 +554,7 @@ const FacultyManagement = () => {
 
           {/* View Faculty Dialog */}
           <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
-            <DialogContent>
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Faculty Details</DialogTitle>
               </DialogHeader>
@@ -571,6 +593,12 @@ const FacultyManagement = () => {
                           `${(selectedFaculty.name || "").toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '')}@srm1234`}
                       </p>
                     </div>
+                  </div>
+
+                  {/* Exam Duty history (published plans only) */}
+                  <div className="border-t pt-4">
+                    <h3 className="text-base font-semibold mb-3">Exam Duty</h3>
+                    <FacultyDutyHistory facultyId={String(selectedFaculty._id || selectedFaculty.id)} allowExport />
                   </div>
                 </div>
               )}
@@ -643,7 +671,11 @@ const FacultyManagement = () => {
                       onCheckedChange={() => toggleSelection(member)}
                     />
                   </TableCell>
-                  <TableCell className="font-medium">{member.name}</TableCell>
+                  <TableCell className="font-medium">
+                    <button className="text-left hover:text-blue-700 hover:underline" onClick={() => handleViewClick(member)} title="View details and exam duties">
+                      {member.name}
+                    </button>
+                  </TableCell>
                   <TableCell>{member.designation || "N/A"}</TableCell>
                   <TableCell>{member.department || "N/A"}</TableCell>
                   <TableCell>{member.username}</TableCell>
@@ -694,7 +726,7 @@ const FacultyManagement = () => {
             <strong>2. No Continuous Participation:</strong> A faculty member assigned to a Forenoon (FN) session is excluded from the subsequent Afternoon (AN) session to prevent fatigue.
           </li>
           <li className="flex gap-2">
-            <strong>3. Department Diversity:</strong> A maximum of 2 faculty members from the same department can be assigned to a single hall.
+            <strong>3. Department Quota:</strong> In each assignment run, one department can supply at most half of the invigilators needed (rounded up). Halls left short are listed so the admin can pick faculty manually or re-run for the remaining vacancies.
           </li>
           <li className="flex gap-2">
             <strong>4. Hard Conflict Check:</strong> The system ensures a faculty member is never assigned to two different halls in the same session.

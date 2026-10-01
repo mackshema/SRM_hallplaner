@@ -1,13 +1,18 @@
 import ExamSession from "../models/ExamSession.js";
 import SeatAssignment from "../models/SeatAssignment.js";
 import Hall from "../models/Hall.js";
-import FacultyDuty from "../models/FacultyDuty.js";
+import ReserveFaculty from "../models/ReserveFaculty.js";
+import { autoPromoteDuePlans, onPlanChanged } from "../services/planLifecycle.js";
+import { loadPlan, deletePlanDuties } from "../services/planService.js";
+import { publishPlan, cancelSchedule as cancelPlanSchedule, unpublishPlan, sendError } from "../services/publishService.js";
 
 /* ===============================
    GET ALL EXAM SESSIONS
 ================================ */
 export const getExamSessions = async (req, res) => {
     try {
+        // Read-time check: SCHEDULED sessions whose publish time passed become PUBLISHED
+        await autoPromoteDuePlans();
         const sessions = await ExamSession.find().sort({ examDate: 1, examSession: 1 });
         res.json(sessions);
     } catch (err) {
@@ -30,7 +35,6 @@ export const createExamSession = async (req, res) => {
         }
 
         // Initialize with ALL currently available halls
-        // This makes the transition seamless - new sessions start with everything active.
         const allHalls = await Hall.find({}, '_id');
 
         const newSession = await ExamSession.create({
@@ -39,7 +43,7 @@ export const createExamSession = async (req, res) => {
             examTime,
             status: "DRAFT",
             activeHalls: allHalls.map(h => h._id),
-            activeDepartments: [] // Departments are dynamically set by timetable now
+            activeDepartments: []
         });
 
         res.json(newSession);
@@ -55,12 +59,17 @@ export const createExamSession = async (req, res) => {
 export const updateExamSession = async (req, res) => {
     try {
         const { id } = req.params;
-        const updates = req.body; // activeHalls, activeDepartments, etc.
+        const updates = req.body;
 
         const session = await ExamSession.findByIdAndUpdate(id, updates, { new: true });
 
         if (!session) {
             return res.status(404).json({ error: "Exam session not found" });
+        }
+
+        // Publishing via the legacy isPublished flag also changes what dashboards show
+        if ("isPublished" in updates || "status" in updates || "examScheduleId" in updates) {
+            await onPlanChanged("internal", id, { reason: "plan updated" });
         }
 
         res.json(session);
@@ -87,6 +96,7 @@ export const finalizeExamSession = async (req, res) => {
             return res.status(404).json({ error: "Exam session not found" });
         }
 
+        await onPlanChanged("internal", id, { reason: "plan finalized" });
         res.json(session);
     } catch (err) {
         console.error("Error finalizing exam session:", err);
@@ -94,37 +104,67 @@ export const finalizeExamSession = async (req, res) => {
     }
 };
 
-
 /* ===============================
    UN-FINALIZE EXAM SESSION (Revert to Draft)
 ================================ */
-/* ===============================
-   UN-FINALIZE EXAM SESSION (Revert to Draft)
-   ================================ */
 export const unfinalizeExamSession = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const session = await ExamSession.findByIdAndUpdate(
-            id,
-            { status: "DRAFT", isPublished: false },
-            { new: true }
-        );
-
-        if (!session) {
+        const plan = await loadPlan("internal", id);
+        if (!plan) {
             return res.status(404).json({ error: "Exam session not found" });
         }
 
-        // Cleanup Duties
-        await FacultyDuty.deleteMany({
-            examDate: session.examDate,
-            examSession: session.examSession
-        });
+        // Cleanup this plan's duties (not the other module's in the same slot)
+        await deletePlanDuties(plan);
 
+        const session = await ExamSession.findByIdAndUpdate(
+            id,
+            { status: "DRAFT", isPublished: false, publish_at: null },
+            { new: true }
+        );
+
+        await onPlanChanged("internal", id, { reason: "plan unlocked for editing" });
         res.json(session);
     } catch (err) {
         console.error("Error unfinalizing exam session:", err);
         res.status(500).json({ error: "Failed to unfinalize exam session" });
+    }
+};
+
+/* ===============================
+   SCHEDULE PUBLISH (or Publish Now)
+   Body: { publish_at: ISO string | null, startTime?, endTime?, absentee_window_minutes? }
+   publish_at = null → publish immediately (now)
+================================ */
+export const schedulePublish = async (req, res) => {
+    try {
+        res.json(await publishPlan("internal", req.params.id, req.body));
+    } catch (err) {
+        sendError(res, err, "Failed to schedule publish");
+    }
+};
+
+/* ===============================
+   CANCEL SCHEDULE (revert to FINAL)
+================================ */
+export const cancelSchedule = async (req, res) => {
+    try {
+        res.json(await cancelPlanSchedule("internal", req.params.id));
+    } catch (err) {
+        sendError(res, err, "Failed to cancel schedule");
+    }
+};
+
+/* ===============================
+   UNPUBLISH (revert Published to FINAL)
+================================ */
+export const unpublishSession = async (req, res) => {
+    try {
+        res.json(await unpublishPlan("internal", req.params.id));
+    } catch (err) {
+        sendError(res, err, "Failed to unpublish session");
     }
 };
 
@@ -135,14 +175,14 @@ export const deleteExamSession = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const session = await ExamSession.findById(id);
-        if (session) {
-            await FacultyDuty.deleteMany({
-                examDate: session.examDate,
-                examSession: session.examSession
-            });
+        const plan = await loadPlan("internal", id);
+        if (plan) {
+            await deletePlanDuties(plan);
+            await ReserveFaculty.deleteMany({ $or: [{ planId: id }, { examSessionId: id }] });
             await ExamSession.findByIdAndDelete(id);
             await SeatAssignment.deleteMany({ examSessionId: id });
+            // Removes its duty records and refreshes its exam schedule
+            await onPlanChanged("internal", id, { reason: "plan deleted", previousScheduleId: plan.examScheduleId });
         }
 
         res.json({ success: true });

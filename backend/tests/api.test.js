@@ -128,23 +128,27 @@ const annaSeatViolations = (plan, hallsById) => {
 };
 
 /** Faculty-allocation checks on a list of {hallId, facultyIds}. */
+// Department quota per plan: total invigilators required / 2, rounded up (utils/facultyAllocation.js)
 const facultyViolations = (facultyAssignments, hallsById, facultyById, hallsWithStudents) => {
-  const v = { understaffed: 0, doubleBooked: 0, over2SameDept: 0 };
+  const v = { understaffed: 0, doubleBooked: 0, overQuota: 0 };
   const used = new Set();
+  const deptCount = {};
+  let totalRequired = 0;
   for (const fa of facultyAssignments) {
     const hId = String(fa.hallId);
     if (!hallsWithStudents.has(hId)) continue;
     const need = hallsById[hId]?.facultyRequired || 1;
+    totalRequired += need;
     if (fa.facultyIds.length < need) v.understaffed++;
-    const deptCount = {};
     for (const f of fa.facultyIds) {
       if (used.has(String(f))) v.doubleBooked++;
       used.add(String(f));
       const d = facultyById[String(f)]?.department;
       deptCount[d] = (deptCount[d] || 0) + 1;
     }
-    if (Object.values(deptCount).some((n) => n > 2)) v.over2SameDept++;
   }
+  const quota = Math.max(1, Math.ceil(totalRequired / 2));
+  v.overQuota = Object.values(deptCount).filter((n) => n > quota).length;
   return { v, used };
 };
 
@@ -310,7 +314,7 @@ async function run() {
   let sessions = (await api('GET', '/exam-sessions', { token: admin })).data;
   check('TT-03', 'FN sessions start 09:30 AM, AN sessions 01:30 PM (internal)', sessions.every((s) => s.examTime === (s.examSession === 'FN' ? '09:30 AM' : '01:30 PM')));
   let allSeated = true, ruleV = { benchMate: 0, horizontal: 0, vertical: 0, outOfBounds: 0, dhSecondSeat: 0, duplicates: 0 };
-  let facV = { understaffed: 0, doubleBooked: 0, over2SameDept: 0 };
+  let facV = { understaffed: 0, doubleBooked: 0, overQuota: 0 };
   const facBySession = {};
   for (const s of sessions) {
     const seats = (await api('GET', `/seating/all?examSessionId=${s._id}`, { token: admin })).data.assignments;
@@ -331,7 +335,7 @@ async function run() {
   check('SEAT-05', 'Seats stay inside the hall grid; no student seated twice', ruleV.outOfBounds === 0 && ruleV.duplicates === 0, JSON.stringify(ruleV));
   check('FDUTY-01', 'Each hall with students gets its "Faculty Required" invigilators', facV.understaffed === 0, `${facV.understaffed} understaffed halls`);
   check('FDUTY-02', 'No invigilator is in two halls in the same session', facV.doubleBooked === 0, `${facV.doubleBooked}`);
-  check('FDUTY-03', 'At most 2 invigilators from the same department per hall', facV.over2SameDept === 0, `${facV.over2SameDept}`);
+  check('FDUTY-03', 'No department supplies more invigilators than its quota (total required / 2, rounded up) in a plan', facV.overQuota === 0, `${facV.overQuota} plans over quota`);
   let overlap = 0;
   for (const d of ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09']) {
     const fn = facBySession[`${d}_FN`] || new Set();
@@ -403,12 +407,24 @@ async function run() {
   await api('PUT', `/exam-sessions/${fn5._id}`, { token: admin, body: { isPublished: true } });
   r = await api('GET', `/student/${mySeat.studentRollNumber.toLowerCase()}`);
   check('LOOK-03', 'After publishing, lookup (any case) shows hall, date and seat', r.status === 200 && r.data?.[0]?.hall, JSON.stringify(r.data?.[0])?.slice(0, 140));
-  r = await api('PATCH', `/seating/mark-absent/${mySeat._id}`, { token: facToken, body: { isAbsent: true } });
-  check('ABS-02', 'Faculty can mark a student absent on a published FINAL session', r.status === 200 && r.data?.isAbsent === true, r.data?.message);
+  // The seat's own invigilator (test-data faculty, password faculty123)
+  const facDuty = (seat) => duties.find((d) => String(d.hallId?._id || d.hallId) === String(seat.hallId) && /^FAC\d+$/i.test(d.facultyId?.username || ''));
+  const absSeat = fnSeats.find((seat) => facDuty(seat));
+  const seatDuty = facDuty(absSeat);
+  const seatInvToken = await login(seatDuty.facultyId.username, 'faculty123');
+  const otherFacToken = seatDuty.facultyId.username.toLowerCase() === 'fac002' ? await login('fac003', 'faculty123') : facToken;
+  r = await api('PATCH', `/seating/mark-absent/${absSeat._id}`, { token: otherFacToken, body: { isAbsent: true } });
+  check('ABS-03', 'A faculty member who does not invigilate the hall cannot mark absentees there', r.status === 403, r.data?.message);
+  r = await api('PATCH', `/seating/mark-absent/${absSeat._id}`, { token: seatInvToken, body: { isAbsent: true } });
+  check('ABS-02', "The hall's invigilator can mark a student absent on a published FINAL session", r.status === 200 && r.data?.isAbsent === true, r.data?.message);
   // A test-data faculty (password faculty123), not the built-in seed account
   const myDuty = duties.find((d) => /^FAC\d+$/.test(d.facultyId?.username || ''));
-  r = await api('GET', `/seating/faculty/${myDuty.facultyId._id}`, { token: facToken });
-  check('FDASH-01', 'Faculty dashboard lists the invigilator\'s duties', r.status === 200 && r.data.length >= 1, `${r.data?.length} duties`);
+  const myToken = await login(myDuty.facultyId.username, 'faculty123');
+  r = await api('GET', `/seating/faculty/${myDuty.facultyId._id}`, { token: myToken });
+  check('FDASH-01', "Faculty dashboard lists the invigilator's duties", r.status === 200 && r.data.length >= 1, `${r.data?.length} duties`);
+  const strangerToken = myDuty.facultyId.username.toLowerCase() === 'fac002' ? await login('fac003', 'faculty123') : facToken;
+  r = await api('GET', `/seating/faculty/${myDuty.facultyId._id}`, { token: strangerToken });
+  check('FDASH-02', "A faculty member cannot read another faculty member's duties", r.status === 403, `status ${r.status}`);
 
   // ---------------- DELEGATION ----------------
   section('Duty delegation');
@@ -486,7 +502,7 @@ async function run() {
   const plans = (await api('GET', '/anna/seating-plans', { token: admin })).data;
   const annaV = { sameDept: 0, sameSubject: 0, overHallMax: 0, dhSecondSeat: 0, duplicates: 0 };
   const annaFac = {};
-  let annaFacV = { understaffed: 0, doubleBooked: 0, over2SameDept: 0 };
+  let annaFacV = { understaffed: 0, doubleBooked: 0, overQuota: 0 };
   for (const p of plans) {
     const v = annaSeatViolations(p, hallsById);
     for (const k in v) annaV[k] += v[k];
@@ -535,6 +551,136 @@ async function run() {
   r = await api('DELETE', `/anna/seating-plan/${anPlan._id}`, { token: admin });
   const annaDutiesAfter = (await api('GET', '/seating/duties/all', { token: admin })).data.filter((d) => d.examDate === anPlan.examDate && d.examSession === 'AN');
   check('ANNA-06', 'Deleting an Anna plan removes its duties', r.data?.success && annaDutiesAfter.length === 0);
+
+  // ---------------- PUBLISH SCHEDULING, RESERVES, ABSENTEES, DUTY SUMMARY, EXPORTS ----------------
+  section('Scheduled publish, reserves, absentees, duty summary, exports');
+  const p6 = `/plans/internal/${fn6._id}`;
+  const fn6Duties = (await api('GET', '/seating/duties/all', { token: admin })).data.filter((d) => d.examDate === fn6.examDate && d.examSession === 'FN');
+  const inv6 = fn6Duties.find((d) => /^FAC\d+$/i.test(d.facultyId?.username || ''));
+  const inv6Token = await login(inv6.facultyId.username, 'faculty123');
+  const inv6Hall = String(inv6.hallId?._id || inv6.hallId);
+  const in1h = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  r = await api('PUT', `${p6}/publish`, { token: admin, body: { publish_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() } });
+  check('PUB-01', 'Publish time in the past is rejected', r.status === 400, r.data?.error);
+  r = await api('PUT', `${p6}/publish`, { token: admin, body: { publish_at: in1h, startTime: '09:30', endTime: '09:00' } });
+  check('PUB-02', 'Exam end time must be after the start time', r.status === 400, r.data?.error);
+  r = await api('PUT', `${p6}/publish`, { token: admin, body: { publish_at: in1h } });
+  check('PUB-03', 'A future publish time schedules the plan', r.data?.status === 'SCHEDULED' && !r.data?.isPublished, r.data?.status);
+  r = await api('GET', `/seating/faculty/${inv6.facultyId._id}`, { token: inv6Token });
+  const hiddenCard = (r.data || []).find((c) => c.examDate === fn6.examDate && c.examSession === 'FN');
+  check('PUB-04', 'Before publish time, the faculty API returns no hall details, only when it goes live', hiddenCard?.isScheduled === true && !hiddenCard.hallName && !!hiddenCard.publish_at_formatted, JSON.stringify(hiddenCard)?.slice(0, 120));
+  const fn6Seat = (await api('GET', `/seating/all?examSessionId=${fn6._id}`, { token: admin })).data.assignments[0];
+  r = await api('GET', `/student/${fn6Seat.studentRollNumber}`);
+  const fn6Look = (Array.isArray(r.data) ? r.data : []).find((x) => x.date === fn6.examDate && x.session === 'FN');
+  check('PUB-05', 'Before publish time, the student API returns no hall/seat, only the go-live time', !fn6Look?.hall && !fn6Look?.seatPosition, JSON.stringify(fn6Look)?.slice(0, 120));
+  r = await api('PUT', `${p6}/cancel-schedule`, { token: admin });
+  check('PUB-06', 'Cancelling a schedule returns the plan to FINAL', r.data?.status === 'FINAL' && !r.data?.publish_at, r.data?.status);
+  r = await api('PUT', `${p6}/publish`, { token: admin, body: {} });
+  check('PUB-07', 'Publish now makes the plan PUBLISHED', r.data?.status === 'PUBLISHED' && r.data?.isPublished === true, r.data?.status);
+  r = await api('PUT', `${p6}/publish`, { token: admin, body: { publish_at: in1h } });
+  check('PUB-08', 'A live plan cannot be rescheduled', r.status === 400, r.data?.error);
+  r = await api('POST', '/seating/generate', { token: admin, body: { examSessionId: fn6._id } });
+  check('PUB-09', 'A PUBLISHED plan stays locked (cannot be regenerated)', r.status === 400, r.data?.message);
+
+  // Exam live status + absentee window (timing set after publishing, exam started 10 min ago)
+  r = await api('PUT', `${p6}/timing`, { token: admin, body: { start_at: new Date(Date.now() - 10 * 60 * 1000).toISOString(), end_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() } });
+  check('LIVE-01', 'Exam timing can be set on a plan', r.status === 200 && !!r.data?.start_at, r.data?.error);
+  r = await api('GET', `/seating/faculty/${inv6.facultyId._id}`, { token: inv6Token });
+  const liveCard = (r.data || []).find((c) => c.examDate === fn6.examDate && c.examSession === 'FN' && !c.isReserve);
+  check('LIVE-02', 'Duty card shows LIVE with an open absentee window', liveCard?.liveStatus === 'LIVE' && liveCard?.absentee?.isOpen === true, `${liveCard?.liveStatus} open=${liveCard?.absentee?.isOpen}`);
+  r = await api('GET', `/absentees/internal/${fn6._id}/${inv6Hall}`, { token: inv6Token });
+  const hallStudents = r.data?.students || [];
+  check('LIVE-03', "The invigilator can open their hall's student list", r.status === 200 && hallStudents.length > 1 && r.data?.canEdit === true, `status ${r.status}, ${hallStudents.length} students`);
+  const otherHall = String(fn6Duties.find((d) => String(d.hallId?._id || d.hallId) !== inv6Hall)?.hallId?._id || '');
+  r = await api('GET', `/absentees/internal/${fn6._id}/${otherHall}`, { token: inv6Token });
+  check('LIVE-04', 'An invigilator cannot open a hall they are not assigned to', r.status === 403, r.data?.error);
+  r = await api('PUT', `/absentees/internal/${fn6._id}/${inv6Hall}`, { token: inv6Token, body: { absentees: [hallStudents[0]?.rollNumber] } });
+  check('LIVE-05', 'Absentees can be submitted while the window is open', r.status === 200 && r.data?.submission?.absentees?.length === 1, r.data?.error || r.data?.message);
+  r = await api('PUT', `/absentees/internal/${fn6._id}/${inv6Hall}`, { token: inv6Token, body: { absentees: [hallStudents[0]?.rollNumber, hallStudents[1]?.rollNumber] } });
+  check('LIVE-06', 'The submission can be edited while the window is open', r.data?.submission?.absentees?.length === 2 && r.data?.submission?.edits === 2, JSON.stringify(r.data?.submission));
+  await api('PUT', `${p6}/timing`, { token: admin, body: { absentee_window_minutes: 5 } });
+  r = await api('PUT', `/absentees/internal/${fn6._id}/${inv6Hall}`, { token: inv6Token, body: { absentees: [] } });
+  check('LIVE-07', 'After the window closes the API refuses uploads', r.status === 403, r.data?.error);
+  r = await api('POST', `/absentees/internal/${fn6._id}/${inv6Hall}/extend`, { token: admin, body: { minutes: 15 } });
+  check('LIVE-08', 'Extending a window needs a reason', r.status === 400, r.data?.error);
+  r = await api('POST', `/absentees/internal/${fn6._id}/${inv6Hall}/extend`, { token: admin, body: { minutes: 15, reason: 'Invigilator was delayed' } });
+  check('LIVE-09', 'Admin can re-open the window with a reason', r.status === 201, r.data?.message);
+  r = await api('PUT', `/absentees/internal/${fn6._id}/${inv6Hall}`, { token: inv6Token, body: { absentees: [hallStudents[0]?.rollNumber] } });
+  check('LIVE-10', 'Uploads work again after the extension', r.status === 200, r.data?.error);
+  r = await api('GET', `/absentees/report/internal/${fn6._id}`, { token: admin });
+  const repHall = (r.data?.halls || []).find((h) => h.hallId === inv6Hall);
+  check('LIVE-11', 'Absentee report shows the submission and the extension log', repHall?.submitted && repHall.absenteeCount === 1 && repHall.extensions.length === 1, JSON.stringify(r.data?.totals));
+
+  // Reserve faculty
+  const freeFac = (await api('GET', `/reserve-faculty/available-faculty?planType=internal&planId=${fn6._id}`, { token: admin })).data.find((f) => f.isAvailable);
+  r = await api('POST', '/reserve-faculty', { token: admin, body: { planType: 'internal', planId: fn6._id, facultyId: inv6.facultyId._id } });
+  check('RES-01', 'An invigilator of the same session cannot be a reserve', r.status === 400, r.data?.error);
+  r = await api('POST', '/reserve-faculty', { token: admin, body: { planType: 'internal', planId: fn6._id, facultyId: freeFac._id } });
+  const reserveId = r.data?._id;
+  check('RES-02', 'A free faculty member can be added as reserve', r.status === 201, r.data?.error);
+  r = await api('POST', `${p6}/halls/${inv6Hall}/faculty`, { token: admin, body: { facultyId: freeFac._id } });
+  check('RES-03', 'A reserve cannot also be added to a hall in the same session', r.status === 400, r.data?.error);
+  r = await api('GET', `/seating/hall/${inv6Hall}?examSessionId=${fn6._id}`, { token: admin });
+  check('RES-04', 'Bench layout data lists the reserve faculty', (r.data?.reserveFaculty || []).some((f) => String(f._id) === String(freeFac._id)), `${r.data?.reserveFaculty?.length} reserves`);
+  r = await api('GET', `/seating/faculty/${freeFac._id}`, { token: admin });
+  check('RES-05', 'The reserve sees a Reserve card on their dashboard (plan is published)', (r.data || []).some((c) => c.isReserve && c.examDate === fn6.examDate), `${r.data?.length} cards`);
+  r = await api('POST', `/reserve-faculty/${reserveId}/convert`, { token: admin, body: { hallId: inv6Hall, replacedFacultyId: inv6.facultyId._id } });
+  const dutiesAfter = (await api('GET', '/seating/duties/all', { token: admin })).data.filter((d) => d.examDate === fn6.examDate && d.examSession === 'FN');
+  check('RES-06', 'Use as replacement moves the hall duty to the reserve', r.status === 200 && dutiesAfter.some((d) => String(d.facultyId?._id) === String(freeFac._id)) && !dutiesAfter.some((d) => String(d.facultyId?._id) === String(inv6.facultyId._id)), r.data?.error || r.data?.message);
+
+  // Vacancies (department quota) + manual picks
+  r = await api('GET', `${p6}/vacancies`, { token: admin });
+  check('VAC-01', 'Vacancy check reports the department quota (total required / 2, rounded up)', r.data?.quota === Math.max(1, Math.ceil(r.data?.totalRequired / 2)), `quota ${r.data?.quota} for ${r.data?.totalRequired}`);
+  r = await api('GET', `${p6}/faculty-picker`, { token: admin });
+  const pickable = (r.data?.faculty || []).find((f) => !f.conflict);
+  check('VAC-02', 'Faculty picker lists duty counts and same-session conflicts', typeof pickable?.dutyCount === 'number' && (r.data?.faculty || []).some((f) => f.conflict), `${r.data?.faculty?.length} faculty`);
+  const hallInv = dutiesAfter.find((d) => String(d.hallId?._id || d.hallId) !== inv6Hall);
+  r = await api('POST', `${p6}/halls/${inv6Hall}/faculty`, { token: admin, body: { facultyId: hallInv.facultyId._id } });
+  check('VAC-03', 'Manual pick blocks a faculty member already in another hall that session', r.status === 400, r.data?.error);
+
+  // Exam schedule -> automatic duty summary
+  r = await api('POST', '/exam-schedules', { token: admin, body: { name: 'IAT 1', category: 'IAT1', academicYear: '2026-2027', semester: 'ODD' } });
+  const sched = r.data;
+  check('SUM-01', 'An exam schedule can be created', r.status === 201, r.data?.error);
+  r = await api('PUT', `/exam-schedules/${sched._id}/plans`, { token: admin, body: { plans: [{ planType: 'internal', planId: fn6._id }, { planType: 'internal', planId: fn5._id }] } });
+  check('SUM-02', 'Schedule is not complete while a plan is unpublished (1 of 2)', r.data?.isComplete === false && r.data?.publishedPlans === 1 && r.data?.totalPlans === 2, `${r.data?.publishedPlans} of ${r.data?.totalPlans}`);
+  r = await api('GET', `/duty-summary/${sched._id}`, { token: admin });
+  check('SUM-03', 'No summary is generated before the schedule is complete', r.data?.summary === null, `summary: ${!!r.data?.summary}`);
+  await api('PUT', `/exam-schedules/${sched._id}/plans`, { token: admin, body: { plans: [{ planType: 'internal', planId: fn6._id }] } });
+  r = await api('GET', `/duty-summary/${sched._id}`, { token: admin });
+  const sumFac = (r.data?.summary?.faculty || []).find((f) => String(f.facultyId) === String(freeFac._id));
+  check('SUM-04', 'When every plan is published the summary is generated and saved automatically', r.data?.summary?.isComplete === true && r.data.summary.totalFacultyWithDuty > 0, `${r.data?.summary?.totalFacultyWithDuty} faculty`);
+  check('SUM-05', 'Converted reserves count once and are listed under reserves', sumFac?.dutyCount === 1 && (r.data?.summary?.reserves || []).some((x) => String(x.facultyId) === String(freeFac._id) && x.convertedCount === 1), JSON.stringify(sumFac)?.slice(0, 100));
+  r = await api('GET', `/faculty-duties/${freeFac._id}`, { token: admin });
+  check('HIST-01', 'Faculty duty history counts the IAT 1 duty', r.data?.countsByCategory?.IAT1 === 1 && r.data?.categories?.some((c) => c.key === 'ANNA'), JSON.stringify(r.data?.countsByCategory));
+  r = await api('GET', `/faculty-duties/${freeFac._id}`, { token: inv6Token });
+  check('HIST-02', "Faculty cannot read another faculty member's duty history", r.status === 403, `status ${r.status}`);
+  await api('PUT', `${p6}/unpublish`, { token: admin });
+  r = await api('GET', `/faculty-duties/${freeFac._id}`, { token: admin });
+  check('HIST-03', 'Duties of unpublished plans are hidden from the history', r.data?.total === 0, `${r.data?.total} duties`);
+  r = await api('GET', `/duty-summary/${sched._id}`, { token: admin });
+  check('SUM-06', 'Unpublishing a plan regenerates the summary (no longer complete)', r.data?.summary?.isComplete === false && r.data?.progress?.publishedPlans === 0, `${r.data?.progress?.publishedPlans} published`);
+  await api('PUT', `${p6}/publish`, { token: admin, body: {} });
+
+  // Excel / PDF exports
+  r = await api('GET', `/exports/plan/internal/${fn6._id}/seating-plan?format=xlsx`, { token: admin, raw: true });
+  check('XLS-01', 'Seating plan exports as Excel (.xlsx)', r.status === 200 && /spreadsheetml/.test(r.type) && r.size > 3000, `${r.status} ${r.type} ${r.size} bytes`);
+  r = await api('GET', `/exports/plan/internal/${fn6._id}/hall-allotment?format=pdf`, { token: admin, raw: true });
+  check('PDF-01', 'Hall allotment exports as PDF', r.status === 200 && /pdf/.test(r.type) && r.size > 1000, `${r.status} ${r.size} bytes`);
+  r = await api('GET', `/exports/plan/internal/${fn6._id}/absentee-report?format=both`, { token: admin, raw: true });
+  check('EXP-12', 'Format "Both" returns a ZIP with Excel and PDF', r.status === 200 && /zip/.test(r.type), `${r.status} ${r.type}`);
+  r = await api('GET', `/exports/schedule/${sched._id}/duty-summary?format=xlsx`, { token: admin, raw: true });
+  check('EXP-13', 'Duty summary exports as Excel', r.status === 200 && /spreadsheetml/.test(r.type), `${r.status}`);
+  r = await api('POST', `/exports/schedule/${sched._id}/package`, { token: admin, body: { format: 'both' } });
+  let job = r.data;
+  for (let i = 0; i < 100 && job?.status !== 'done' && job?.status !== 'failed'; i++) {
+    await new Promise((res) => setTimeout(res, 300));
+    job = (await api('GET', `/exports/jobs/${job.id}`, { token: admin })).data;
+  }
+  check('EXP-14', 'Bulk package runs as a background job and finishes', job?.status === 'done' && job.progress === 100, `${job?.status} ${job?.progress}% ${job?.error || ''}`);
+  r = await api('GET', `/exports/jobs/${job?.id}/download`, { token: admin, raw: true });
+  check('EXP-15', 'The finished package downloads as a ZIP', r.status === 200 && r.size > 10000, `${r.status} ${r.size} bytes`);
 
   // ---------------- SETTINGS ----------------
   section('Settings');

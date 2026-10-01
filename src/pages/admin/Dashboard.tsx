@@ -21,7 +21,9 @@ import {
   Users,
   Settings as SettingsIcon,
   LogOut,
-  ShieldAlert
+  ShieldAlert,
+  UserCheck,
+  BarChart3
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -80,6 +82,22 @@ const AdminDashboard = () => {
                   <Link to="/admin/exam-restrictions">
                     <ShieldAlert className="h-4 w-4" />
                     <span>Exam Restrictions</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to="/admin/reserve-faculty">
+                    <UserCheck className="h-4 w-4 text-indigo-600" />
+                    <span>Reserve Faculty</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to="/admin/duty-summary">
+                    <BarChart3 className="h-4 w-4 text-indigo-600" />
+                    <span>Duty Summary</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

@@ -15,7 +15,8 @@
     "backup": "node scripts/backup.js",
     "restore": "echo 'Usage: mongorestore --db exam_hall_allotment ./backups/<folder>/exam_hall_allotment'",
     "test:api": "node tests/api.test.js",
-    "test:data": "node scripts/generate_test_data.js"
+    "test:data": "node scripts/generate_test_data.js",
+    "test:unit": "node --test tests/facultyAllocation.test.js"
   },
   "keywords": [],
   "author": "",
@@ -26,6 +27,7 @@
     "cors": "^2.8.5",
     "docx": "^9.6.0",
     "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.2.0",

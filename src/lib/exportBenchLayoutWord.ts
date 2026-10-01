@@ -10,6 +10,8 @@ import {
     WidthType,
     PageOrientation,
     BorderStyle,
+    TabStopType,
+    TabStopPosition,
 } from "docx";
 import { Hall } from "./db";
 
@@ -42,6 +44,8 @@ interface ExportBenchLayoutWordOptions {
     examSession: string;
     examTime: string;
     headerSettings: HeaderSettings;
+    /** Reserve faculty line, printed opposite the signature */
+    reserveText?: string;
 }
 
 export const exportBenchLayoutWordDoc = async ({
@@ -53,6 +57,7 @@ export const exportBenchLayoutWordDoc = async ({
     examSession,
     examTime,
     headerSettings,
+    reserveText = "None assigned",
 }: ExportBenchLayoutWordOptions) => {
     // 1. Prepare Header Paragraphs
     const headerParagraphs: any[] = [];
@@ -524,10 +529,14 @@ export const exportBenchLayoutWordDoc = async ({
                         spacing: { before: 300 },
                     }),
 
+                    // Reserve faculty (left) opposite the signature line (right)
                     new Paragraph({
-                        text: "Name & Signature of the Hall Superintendent",
-                        alignment: AlignmentType.RIGHT,
+                        tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
                         spacing: { before: 800 },
+                        children: [
+                            new TextRun({ text: `Reserve Faculty: ${reserveText}`, bold: true }),
+                            new TextRun({ text: "\tName & Signature of the Hall Superintendent" }),
+                        ],
                     }),
                 ],
             },

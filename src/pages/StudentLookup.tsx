@@ -38,6 +38,10 @@ interface ExamDetail {
     rollNumber: string;
     seatPosition: string; 
     type?: string; // Internal or Anna University
+    // Set when the plan is scheduled but not live yet (no hall/seat is sent)
+    scheduled?: boolean;
+    publish_at?: string;
+    publish_at_formatted?: string;
 }
 
 const StudentLookup = () => {
@@ -194,7 +198,42 @@ const StudentLookup = () => {
                 {/* Results Area */}
                 {!isLoading && hasSearched && examDetails && examDetails.length > 0 && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        {examDetails.map((detail, index) => (
+                        {examDetails.map((detail, index) => {
+                            if (detail.scheduled) {
+                                return (
+                                    <Card key={index} className="overflow-hidden border-l-4 border-l-indigo-500 shadow-md bg-indigo-50/20">
+                                        <CardContent className="p-6">
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className="bg-indigo-100 text-indigo-700 p-2.5 rounded-full">
+                                                    <Clock className="h-5 w-5" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-semibold text-slate-900 text-base">Seating Announcement Scheduled</h3>
+                                                    <p className="text-xs text-slate-500">Exam Date: {detail.date} ({detail.session} Session)</p>
+                                                </div>
+                                            </div>
+                                            <div className="p-3.5 bg-indigo-50 border border-indigo-100 rounded-lg text-sm text-indigo-900 flex items-center gap-2">
+                                                <Calendar className="h-4 w-4 text-indigo-600 shrink-0" />
+                                                <span>
+                                                    Seating details will be available on <strong>{detail.publish_at_formatted || new Date(detail.publish_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}</strong>
+                                                </span>
+                                            </div>
+                                            <div className="mt-4 pt-3 border-t flex justify-between items-center text-xs text-slate-400">
+                                                {detail.type && (
+                                                    <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded border font-medium">
+                                                        {detail.type} Exam
+                                                    </span>
+                                                )}
+                                                <span className="bg-indigo-100 text-indigo-700 font-medium px-2 py-0.5 rounded">
+                                                    Scheduled
+                                                </span>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                );
+                            }
+
+                            return (
                             <Card key={index} className="overflow-hidden border-l-4 border-l-primary shadow-md">
                                 <CardContent className="p-6">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -257,7 +296,8 @@ const StudentLookup = () => {
                                     </div>
                                 </CardContent>
                             </Card>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
 

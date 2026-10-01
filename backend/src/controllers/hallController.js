@@ -2,6 +2,7 @@ import Hall from "../models/Hall.js";
 import FacultyDuty from "../models/FacultyDuty.js";
 import ExamSession from "../models/ExamSession.js";
 import AnnaSeating from "../models/AnnaSeating.js";
+import { isLocked } from "../utils/planStatus.js";
 
 export const createHall = async (req, res) => {
   try {
@@ -134,7 +135,7 @@ export const getAllHalls = async (req, res) => {
     if (examSessionId) {
       const session = await ExamSession.findById(examSessionId);
       if (session) {
-        if (session.status === 'FINAL') {
+        if (isLocked(session.status)) {
           // Fetch duties for this FINAL session
           const duties = await FacultyDuty.find({
             examDate: session.examDate,
@@ -172,7 +173,7 @@ export const getAllHalls = async (req, res) => {
         // Check if it's an Anna University plan
         const annaPlan = await AnnaSeating.findById(examSessionId);
         if (annaPlan) {
-          if (annaPlan.status === 'FINAL') {
+          if (isLocked(annaPlan.status)) {
             const duties = await FacultyDuty.find({
               examDate: annaPlan.examDate,
               examSession: annaPlan.session
@@ -230,7 +231,7 @@ export const getHallById = async (req, res) => {
     if (examSessionId) {
       const session = await ExamSession.findById(examSessionId);
       if (session) {
-        if (session.status === 'FINAL') {
+        if (isLocked(session.status)) {
           // Fetch duties for this FINAL session
           const duties = await FacultyDuty.find({
             examDate: session.examDate,
@@ -257,7 +258,7 @@ export const getHallById = async (req, res) => {
         // Check if it's an Anna University plan
         const annaPlan = await AnnaSeating.findById(examSessionId);
         if (annaPlan) {
-          if (annaPlan.status === 'FINAL') {
+          if (isLocked(annaPlan.status)) {
             const duties = await FacultyDuty.find({
               examDate: annaPlan.examDate,
               examSession: annaPlan.session,

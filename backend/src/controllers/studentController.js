@@ -5,6 +5,10 @@ import Hall from "../models/Hall.js";
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
+import { isPlanVisible, formatIST } from "../utils/planStatus.js";
+
+// Visibility (published + publish time passed) is the shared rule in utils/planStatus.js
+const formatISTDateTime = formatIST;
 
 const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
@@ -47,50 +51,78 @@ export const getStudentExamDetails = async (req, res) => {
             .populate('hallId');
 
         if (internalSeats && internalSeats.length > 0) {
-            const finalizedInternal = internalSeats.filter(seat => 
-                seat.examSessionId && 
-                seat.examSessionId.status === "FINAL" && 
-                seat.examSessionId.isPublished === true
-            );
+            const finalizedInternal = internalSeats.filter(seat => {
+                const s = seat.examSessionId;
+                if (!s) return false;
+                return s.isPublished === true || s.status === "SCHEDULED" || s.status === "PUBLISHED";
+            });
 
+            // Separate visible vs scheduled
             finalizedInternal.forEach(seat => {
-                const rowLabel = seat.isExtraBench ? "Extra Bench" : `Row ${seat.row}`;
-                results.push({
-                    hall: seat.hallId ? seat.hallId.name : "N/A",
-                    floor: seat.hallId ? seat.hallId.floor : "N/A",
-                    date: seat.examSessionId.examDate,
-                    session: seat.examSessionId.examSession,
-                    time: seat.examSessionId.examTime,
-                    rollNumber: seat.studentRollNumber,
-                    seatPosition: `${rowLabel} - Column ${seat.column} - Seat ${seat.benchPosition}`,
-                    type: "Internal"
-                });
+                const session = seat.examSessionId;
+                if (isPlanVisible(session)) {
+                    const rowLabel = seat.isExtraBench ? "Extra Bench" : `Row ${seat.row}`;
+                    results.push({
+                        hall: seat.hallId ? seat.hallId.name : "N/A",
+                        floor: seat.hallId ? seat.hallId.floor : "N/A",
+                        date: session.examDate,
+                        session: session.examSession,
+                        time: session.examTime,
+                        rollNumber: seat.studentRollNumber,
+                        seatPosition: `${rowLabel} - Column ${seat.column} - Seat ${seat.benchPosition}`,
+                        type: "Internal"
+                    });
+                } else if (session.publish_at) {
+                    // Scheduled but not yet visible
+                    results.push({
+                        type: "Internal",
+                        date: session.examDate,
+                        session: session.examSession,
+                        scheduled: true,
+                        publish_at: session.publish_at,
+                        publish_at_formatted: formatISTDateTime(session.publish_at)
+                    });
+                }
             });
         }
 
         // 2. FETCH ANNA UNIVERSITY ASSIGNMENTS
-        const annaPlans = await AnnaSeating.find({ 
-            isPublished: true, 
-            status: "FINAL",
+        // Fetch all published OR scheduled Anna plans for this roll number
+        const annaPlans = await AnnaSeating.find({
+            $or: [
+                { isPublished: true, status: { $in: ["FINAL", "PUBLISHED"] } },
+                { status: "SCHEDULED" }
+            ],
             "assignments.rollNumber": normalizedRoll
         });
 
         if (annaPlans && annaPlans.length > 0) {
             annaPlans.forEach(plan => {
-                const myAssignment = plan.assignments.find(a => 
+                const myAssignment = plan.assignments.find(a =>
                     a.rollNumber.toUpperCase() === normalizedRoll
                 );
-                
-                if (myAssignment) {
+
+                if (!myAssignment) return;
+
+                if (isPlanVisible(plan)) {
                     results.push({
                         hall: myAssignment.hallName || "N/A",
-                        floor: "N/A", // Anna University seating doesn't always store floor in assignment
+                        floor: "N/A",
                         date: plan.examDate,
                         session: plan.session,
-                        time: plan.session === 'FN' ? '09:30 AM' : '02:00 PM', // Anna slot times (see resolveExamTime)
+                        time: plan.session === 'FN' ? '09:30 AM' : '02:00 PM',
                         rollNumber: myAssignment.rollNumber,
                         seatPosition: `Row ${myAssignment.row} - Column ${myAssignment.column} - Seat ${myAssignment.benchPosition}`,
                         type: "Anna University"
+                    });
+                } else if (plan.publish_at) {
+                    results.push({
+                        type: "Anna University",
+                        date: plan.examDate,
+                        session: plan.session,
+                        scheduled: true,
+                        publish_at: plan.publish_at,
+                        publish_at_formatted: formatISTDateTime(plan.publish_at)
                     });
                 }
             });

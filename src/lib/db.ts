@@ -72,9 +72,15 @@ export interface ExamSession {
   examDate: string;
   examSession: "FN" | "AN";
   examTime: string;
-  status: "DRAFT" | "FINAL";
+  status: "DRAFT" | "FINAL" | "SCHEDULED" | "PUBLISHED";
   finalizedAt?: string;
   isPublished?: boolean;
+  publish_at?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  absentee_window_minutes?: number | null;
+  examScheduleId?: string | null;
+  facultyAssignments?: { hallId: string; facultyIds: string[] }[];
   activeHalls?: string[];
   activeDepartments?: string[];
   selectedFaculty?: string[];
@@ -251,6 +257,19 @@ class DatabaseService {
         examDate: s.examDate,
         examSession: s.examSession,
         examTime: s.examTime,
+        isScheduled: s.isScheduled,
+        isPublished: s.isPublished,
+        isReserve: s.isReserve,
+        publish_at: s.publish_at,
+        publish_at_formatted: s.publish_at_formatted,
+        message: s.message,
+        // Exam timing + absentee window (null until the plan has timing)
+        planType: s.planType,
+        planId: s.planId,
+        liveStatus: s.liveStatus ?? null,
+        startAt: s.startAt ?? null,
+        endAt: s.endAt ?? null,
+        absentee: s.absentee ?? null,
       }));
     } catch (error) {
       console.error("Error fetching faculty assigned halls:", error);

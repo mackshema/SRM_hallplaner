@@ -6,6 +6,9 @@ import FacultyDuty from '../models/FacultyDuty.js';
 import User from '../models/User.js';
 import Settings from '../models/Settings.js';
 import AnnaSeating from '../models/AnnaSeating.js';
+import ReserveFaculty from '../models/ReserveFaculty.js';
+import { isLocked } from '../utils/planStatus.js';
+import { annaExamTime } from '../services/planService.js';
 import { generateBenchLayoutDocx, generateConsolidatedPdf, generateFacultyDutyPdf, generateSummaryReportPdf, generateAllBenchLayoutsDocx } from '../utils/documentGenerators.js';
 
 export const downloadFullExamPackage = async (req, res) => {
@@ -19,7 +22,7 @@ export const downloadFullExamPackage = async (req, res) => {
         }
 
         // 2. Validate status = FINALIZED
-        if (session.status !== "FINAL") {
+        if (!isLocked(session.status)) {
             return res.status(400).json({ error: "Exam plan is not finalized. Please finalize before downloading." });
         }
 
@@ -46,6 +49,7 @@ export const downloadFullExamPackage = async (req, res) => {
         const uniqueDepts = [...new Set(assignments.map(a => a.departmentId).filter(Boolean))];
         const allDepts = uniqueDepts.map((d, i) => ({ _id: d, name: d, id: d }));
         const duties = await FacultyDuty.find({ examDate: session.examDate, examSession: session.examSession }).populate('facultyId hallId');
+        const reserveFaculty = await ReserveFaculty.find({ examDate: session.examDate, examSession: session.examSession, status: 'reserve' }).populate('facultyId');
 
         // Setup archiver
         res.attachment(`Full_Exam_Package_${dateStr}_${session.examSession}.zip`);
@@ -68,7 +72,8 @@ export const downloadFullExamPackage = async (req, res) => {
                 examDate: session.examDate,
                 examSession: session.examSession,
                 examTime: session.examTime,
-                headerSettings: settings
+                headerSettings: settings,
+                reserveFaculty
             });
             archive.append(docBuffer, { name: `${folderPrefix}/Hall_Plans/${hall.name}_Bench_Layout.docx` });
         }
@@ -91,6 +96,7 @@ export const downloadFullExamPackage = async (req, res) => {
         if (duties.length > 0) {
             const facultyDutyPdf = await generateFacultyDutyPdf({
                 duties,
+                reserveFaculty,
                 examDate: session.examDate,
                 examSession: session.examSession,
                 examTime: session.examTime,
@@ -142,6 +148,7 @@ const buildHallLayouts = async (examPlanId, hallId) => {
     const halls = await Hall.find({ _id: { $in: hallIds } });
     const uniqueDepts = [...new Set(assignments.map(a => a.departmentId).filter(Boolean))];
     const allDepts = uniqueDepts.map(d => ({ _id: d, name: d, id: d }));
+    const reserveFaculty = await ReserveFaculty.find({ examDate: session.examDate, examSession: session.examSession, status: 'reserve' }).populate('facultyId');
 
     const layouts = [];
     for (const hall of halls) {
@@ -152,7 +159,8 @@ const buildHallLayouts = async (examPlanId, hallId) => {
             examDate: session.examDate,
             examSession: session.examSession,
             examTime: session.examTime,
-            headerSettings: settings
+            headerSettings: settings,
+            reserveFaculty
         });
         layouts.push({ name: `${hall.name}_Bench_Layout.docx`, buffer });
     }
@@ -253,6 +261,7 @@ export const downloadAnnaExamPackage = async (req, res) => {
         const usedHallIds = [...new Set(assignments.map(a => a.hallId.toString()))];
         const usedHallsList = await Hall.find({ _id: { $in: usedHallIds } }).lean();
         const duties = await FacultyDuty.find({ examDate: examDate, examSession: session }).populate('facultyId hallId').lean();
+        const reserveFaculty = await ReserveFaculty.find({ examDate, examSession: session, status: 'reserve' }).populate('facultyId').lean();
 
         // Setup archiver
         res.attachment(`AnnaUniversity_Package_${dateStr}_${session}.zip`);
@@ -274,8 +283,9 @@ export const downloadAnnaExamPackage = async (req, res) => {
                 departments: syntheticDepts,
                 examDate,
                 examSession: session,
-                examTime: "09:30 AM", // default
-                headerSettings: cleanSettings
+                examTime: annaExamTime(session),
+                headerSettings: cleanSettings,
+                reserveFaculty
             });
             archive.append(docBuffer, { name: `${folderPrefix}/Hall_Plans/${hall.name}_Bench_Layout.docx` });
         }
@@ -288,7 +298,7 @@ export const downloadAnnaExamPackage = async (req, res) => {
                 departments: syntheticDepts,
                 examDate,
                 examSession: session,
-                examTime: "09:30 AM",
+                examTime: annaExamTime(session),
                 headerSettings: cleanSettings
             });
             archive.append(consolidatedPdf, { name: `${folderPrefix}/Consolidated_Plan/Consolidated_All_Halls.pdf` });
@@ -298,9 +308,10 @@ export const downloadAnnaExamPackage = async (req, res) => {
         if (duties.length > 0) {
             const facultyDutyPdf = await generateFacultyDutyPdf({
                 duties,
+                reserveFaculty,
                 examDate,
                 examSession: session,
-                examTime: "09:30 AM",
+                examTime: annaExamTime(session),
                 headerSettings: cleanSettings
             });
             archive.append(facultyDutyPdf, { name: `${folderPrefix}/Faculty_Duty/Faculty_Duty_Chart.pdf` });
@@ -312,7 +323,7 @@ export const downloadAnnaExamPackage = async (req, res) => {
             departments: syntheticDepts,
             examDate,
             examSession: session,
-            examTime: "09:30 AM",
+            examTime: annaExamTime(session),
             headerSettings: cleanSettings
         });
         archive.append(summaryPdf, { name: `${folderPrefix}/Summary_Report.pdf` });
@@ -357,7 +368,7 @@ export const downloadAnnaConsolidated = async (req, res) => {
             departments: syntheticDepts,
             examDate,
             examSession: session,
-            examTime: "09:30 AM",
+            examTime: annaExamTime(session),
             headerSettings: cleanSettings
         });
 
@@ -394,13 +405,15 @@ export const downloadAnnaLayouts = async (req, res) => {
         const usedHallIds = [...new Set(assignments.map(a => a.hallId.toString()))];
         const usedHallsList = await Hall.find({ _id: { $in: usedHallIds } }).lean();
 
+        const reserveFaculty = await ReserveFaculty.find({ examDate, examSession: session, examType: 'Anna', status: 'reserve' }).populate('facultyId').lean();
         const buffer = await generateAllBenchLayoutsDocx({
+            reserveFaculty,
             halls: usedHallsList,
             seatAssignments: compatAssignments,
             departments: syntheticDepts,
             examDate,
             examSession: session,
-            examTime: "09:30 AM",
+            examTime: annaExamTime(session),
             headerSettings: cleanSettings
         });
 

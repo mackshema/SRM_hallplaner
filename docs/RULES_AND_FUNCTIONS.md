@@ -172,21 +172,27 @@ These rules apply in automatic generation (both planners) and in manual Generate
 |----|------|--------|
 | FDUTY-01 / ANNA-FAC-01 | Every hall with students gets its `Faculty Required` number of invigilators. Halls with no students get none. | ✅ |
 | FDUTY-02 | An invigilator is never in two halls in the same session. | ✅ |
-| FDUTY-03 | A hall has at most 2 invigilators from the same department. | ✅ |
+| FDUTY-03 | **Department quota:** in one plan, a department supplies at most `ceil(total invigilators required / 2)` invigilators (rounding set in `QUOTA_ROUNDING`, [utils/facultyAllocation.js](../backend/src/utils/facultyAllocation.js)). Faculty with fewer total duties are picked first, and halls prefer a department they don't have yet. Unit tests: `npm run test:unit`. | ✅ |
+| 📄 | Reserve faculty of the session and faculty already on duty in it are never auto-assigned. | |
+| VAC-01/02/03 | Halls the quota leaves short are reported as vacancies ("X halls still need faculty"). The admin adds faculty by hand (same-session conflicts are blocked; exceeding the quota only warns) or re-runs auto-assignment for the remaining vacancies only. Existing assignments are never changed. | ✅ |
 | FDUTY-04 / ANNA-FAC-02 | **No continuous duty:** nobody invigilates the session right after one they already have (FN then AN on the same day, or the last session of one day then the next session). | ✅ |
 | FDUTY-05 / ANNA-FAC-03 | At most **4 duties in any 7 days**. | ✅ |
 | 📄 | Sessions are generated in date order, FN before AN, so each session sees the duties handed out before it. | |
-| 📄 | If not enough invigilators qualify, the admin sees a shortage warning with a list of free faculty. Faculty chosen by the admin ("demand") are exempt from the same-department, continuous-duty and weekly limits. | |
+| 📄 | Faculty chosen by the admin ("demand") are exempt from the department quota, continuous-duty and weekly limits; they are used only when regular faculty run out. | |
 | 📄 | Automatic generation picks from all faculty. Manual "Generate" picks from the faculty selected for that session, or from those flagged "selected for generation". | |
 | FDASH-01 | Faculty see their own duties on their dashboard. | ✅ |
+| FDASH-02 | A faculty member can't read another faculty member's duties. | ✅ |
 
 ## 8. Session lifecycle
 
 ```
-DRAFT ──finalize──▶ FINAL ──publish──▶ FINAL + PUBLISHED
-  ▲                   │
-  └────unfinalize─────┘  (unpublishes and deletes duties)
+DRAFT ──finalize──▶ FINAL ──publish now──────────────▶ PUBLISHED
+  ▲                   │  └──schedule──▶ SCHEDULED ──publish_at passes──┘
+  │                   │                    │ cancel (before it goes live) ▶ FINAL
+  └────unlock─────────┘  (from any locked state: unpublishes and deletes duties)
 ```
+
+FINAL, SCHEDULED and PUBLISHED are all *locked* (no regeneration or seat edits). Visibility is computed when data is read: students and faculty see a plan only when it is published **and** `publish_at <= now` ([utils/planStatus.js](../backend/src/utils/planStatus.js)). A one-minute scheduler also flips due SCHEDULED plans to PUBLISHED so statuses, duty records and schedule completion stay current.
 
 | ID | Rule | Status |
 |----|------|--------|
@@ -200,6 +206,11 @@ DRAFT ──finalize──▶ FINAL ──publish──▶ FINAL + PUBLISHED
 | ANNA-05 | Finalizing an already-final Anna plan is harmless; no duplicate duties are created. | ✅ |
 | ANNA-07 | Moving an Anna plan back to DRAFT deletes its duties; finalizing again recreates them once. | ✅ |
 | ANNA-06 | Deleting an Anna plan deletes its duties. | ✅ |
+| PUB-01/02 | Publish time can't be in the past; exam end must be after start; publishing must happen before the exam starts. | ✅ |
+| PUB-03/06/07 | Schedule for later (SCHEDULED), cancel back to FINAL, or publish now (PUBLISHED). | ✅ |
+| PUB-04/05 | Before the publish time the faculty and student APIs return no hall/seat details - only when they go live. | ✅ |
+| PUB-08/09 | A live plan can't be rescheduled (unpublish first) and stays locked. | ✅ |
+| 📄 | Plans published before scheduling existed (FINAL + isPublished) are migrated to PUBLISHED with their original time. | |
 
 ### Student seat lookup (public)
 
@@ -214,7 +225,39 @@ DRAFT ──finalize──▶ FINAL ──publish──▶ FINAL + PUBLISHED
 | ID | Rule | Status |
 |----|------|--------|
 | ABS-01 | Absentees can only be marked on FINAL, published sessions. | ✅ |
-| ABS-02 | Faculty or admin can mark or clear an absence. Who marked it and when is recorded. | ✅ |
+| ABS-02 | The hall's invigilator or an admin can mark or clear an absence. Who marked it and when is recorded. | ✅ |
+| ABS-03 | Faculty can't mark absentees in a hall they don't invigilate. | ✅ |
+
+### Exam timing and absentee upload window
+
+| ID | Rule | Status |
+|----|------|--------|
+| LIVE-01/02 | With exam start/end set (publish dialog or plan timing), duties show Upcoming / Live / Completed, computed at read time. Plans without timing show no live status. | ✅ |
+| LIVE-03/04 | An invigilator can open only their own hall's student list. | ✅ |
+| LIVE-05/06 | Absentees can be submitted and edited while the window is open (default: Settings, 120 min after start; per-plan override). Each save is kept with who and when. | ✅ |
+| LIVE-07 | After the window closes, the API refuses uploads. | ✅ |
+| LIVE-08/09/10 | Admin can re-open a window for a hall or one invigilator; a reason is required and every extension is logged. | ✅ |
+| LIVE-11 | Absentee report per hall: submitted or not, count, list, extensions, and a flag when the window closed with no submission. | ✅ |
+
+### Reserve faculty
+
+| ID | Rule | Status |
+|----|------|--------|
+| RES-01/03 | A faculty member can't be a reserve and an invigilator in the same session (either direction). | ✅ |
+| RES-02 | Reserves are per plan and stored as a link to the faculty record. | ✅ |
+| RES-04 | Reserve names appear at the bottom of the bench layout, opposite the signature, and in exports. | ✅ |
+| RES-05 | Reserves see a Reserve card on their dashboard once the plan is published. | ✅ |
+| RES-06 | "Use as replacement" moves the hall duty from the absent invigilator to the reserve and marks the reserve as converted. | ✅ |
+
+### Exam schedules, duty summary and duty history
+
+| ID | Rule | Status |
+|----|------|--------|
+| SUM-01/02 | Plans are grouped under an exam schedule (IAT 1, IAT 2, Model, Anna...). It is Complete when every plan is PUBLISHED (not just scheduled). | ✅ |
+| SUM-03/04 | The duty summary is generated and saved automatically when the schedule becomes Complete, not before. | ✅ |
+| SUM-05 | A converted reserve counts as one duty and is listed under reserves with the hall they moved to. | ✅ |
+| SUM-06 | Any later change to a plan (unpublish, reassignment...) regenerates the saved summary. | ✅ |
+| HIST-01/02/03 | Faculty duty history by category (categories come from Settings), from the same duty table as the summary, only published plans; faculty see only their own. | ✅ |
 
 ## 9. Duty delegation
 
@@ -250,6 +293,10 @@ Pending HOD Approval ──HOD approves──▶ Pending Faculty Response ──
 | EXP-08 | The server exposes `Content-Disposition`, so downloads keep the server's file name. | ✅ |
 | EXP-09/10/11 | Hall bench layouts (Word) download one hall at a time or all together as a ZIP, before or after finalizing; a hall with no students in the session gives 404. | ✅ |
 | SET-01/02 | One settings record (institution name, logos, exam name, academic year) appears on all exported documents. Admin only. | ✅ |
+| XLS-01 / PDF-01 | Every document type (hall allotment, seating plan, student list, faculty duty, reserve faculty, absentee report, department summary, duty summary) exports as Excel and PDF from one data layer ([backend/src/exports](../backend/src/exports)). | ✅ |
+| EXP-12/13 | "Both" returns a ZIP with Excel/ and PDF/ folders; the duty summary exports too. | ✅ |
+| EXP-14/15 | "Download all" for a plan or a whole schedule runs as a background job with progress, then downloads one ZIP. | ✅ |
+| 📄 | The Settings logo is in every export: a real page header in Word, repeated on every PDF page, embedded in Excel. Aspect ratio kept; no logo = no placeholder. The Word exports stay available behind Settings → "Use legacy Word exports". | |
 
 ---
 
@@ -271,6 +318,10 @@ All 12 bugs were found by this test suite, fixed, and are now covered by the che
 | 10 | A failed HOD email turned a saved request into an error. | Saved request returns 201 with `emailSent: false`. | DEL-02 |
 | 11 | Uploading either timetable deleted **all** faculty duties, including the other planner's. | Each upload deletes only its own sessions' duties. | XMOD-01 |
 | 12 | An invalid designation returned 500. | Returns 400 with the reason. | FAC-05 |
+| 13 | Anna hall layouts (Word) returned 500 (`reserveFaculty` was undefined). | Reserves are passed in and printed opposite the signature. | EXP-05 |
+| 14 | SCHEDULED/PUBLISHED plans were treated as unlocked (could be regenerated/edited, hall views lost their duties, absent marking failed, full package refused). | All checks use the locked-status rule. | PUB-09, ABS-02, EXP-02 |
+| 15 | Any faculty member could read any other faculty member's duties and mark absentees in any hall. | Own duties / own hall only. | FDASH-02, ABS-03 |
+| 16 | Moving an Anna plan from PUBLISHED back to FINAL recreated its duties (duplicates); PUBLISHED to DRAFT left them behind. | Explicit transitions: duties are created on DRAFT → FINAL and removed on unlock. | ANNA-05/07 |
 
 Earlier fixes, also covered by tests: shared subject codes, invalid sessions wiping plans, automatic internal generation dropping students, and arrear registrations hiding whole classes. See [test-data/README.md](../test-data/README.md).
 

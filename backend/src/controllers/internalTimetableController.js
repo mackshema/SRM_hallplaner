@@ -7,6 +7,10 @@ import User from '../models/User.js';
 import FacultyDuty from '../models/FacultyDuty.js';
 import { deleteSessionDuties, compareSessions, previousSession, dutiesFromAssignments } from '../utils/facultyDuties.js';
 import { timetableEntryFromRow, validateTimetable, timetableErrorResponse, applyTimetable, parseRawTimetableLines } from '../utils/timetableImport.js';
+import { isLocked } from '../utils/planStatus.js';
+import { afterPlansDeleted } from '../services/planLifecycle.js';
+import { allocateFaculty, vacancyMessage } from '../utils/facultyAllocation.js';
+import { totalDutyCounts, reservedFacultyIds } from '../services/facultyPickerService.js';
 
 export const getExamData = async (req, res) => {
   try {
@@ -29,8 +33,10 @@ export const uploadTimetableRaw = async (req, res) => {
 
     const matchedSubjects = await applyTimetable(InternalExamData, updates);
     // NEW: Clear old plans as requested by user
-    await deleteSessionDuties(await ExamSession.find({}, 'examDate examSession').lean());
+    const oldSessions = await ExamSession.find({}, 'examDate examSession examScheduleId').lean();
+    await deleteSessionDuties(oldSessions);
     await ExamSession.deleteMany({});
+    await afterPlansDeleted('internal', oldSessions);
     await SeatAssignment.deleteMany({});
     await Hall.updateMany({}, { $set: { facultyAssigned: [] } });
 
@@ -78,8 +84,10 @@ export const uploadTimetable = async (req, res) => {
     const matchedCount = await applyTimetable(InternalExamData, validUpdates);
 
     // NEW: Clear old plans as requested by user
-    await deleteSessionDuties(await ExamSession.find({}, 'examDate examSession').lean());
+    const oldSessions = await ExamSession.find({}, 'examDate examSession examScheduleId').lean();
+    await deleteSessionDuties(oldSessions);
     await ExamSession.deleteMany({});
+    await afterPlansDeleted('internal', oldSessions);
     await SeatAssignment.deleteMany({});
     await Hall.updateMany({}, { $set: { facultyAssigned: [] } });
 
@@ -198,11 +206,13 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
   // Duties handed out in this run (and in existing draft sessions). They aren't
   // saved as FacultyDuty until finalize, but the duty rules must still count them.
   const runDuties = [];
+  const planVacancies = []; // halls left without enough invigilators, per plan
+  const baseDutyCounts = await totalDutyCounts();
 
   for (const { examDate, session } of uniqueSessions) {
      let examSessionDoc = await ExamSession.findOne({ examDate, examSession: session });
      if (examSessionDoc) {
-        if (examSessionDoc.status !== 'FINAL') {
+        if (!isLocked(examSessionDoc.status)) {
           runDuties.push(...dutiesFromAssignments(examDate, session, examSessionDoc.facultyAssignments));
         }
         skippedCount++;
@@ -436,16 +446,15 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
        allDuties.filter(d => d.examDate === prev.examDate && d.examSession === prev.examSession).forEach(d => previouslyAssignedIds.add(d.facultyId.toString()));
      }
 
-     const isFacultyAvailable = (faculty, hallAssignedIds) => {
+     // Hard constraint: reserves of this slot can't also invigilate (and vice versa)
+     const reservedSet = await reservedFacultyIds(examDate, session);
+
+     // Hard rules for this session; the department limit is the per-run quota
+     // applied by allocateFaculty (replaces the fixed "max 2 per hall").
+     const isFacultyAvailable = (faculty) => {
        const fId = faculty._id.toString();
        const isDemand = demandFacultyIds.includes(fId);
-
-       if (hallAssignedIds.includes(fId)) return false;
-       const sameDeptCount = hallAssignedIds.filter(id => {
-         const f = allFacultyForSession.find(fac => fac._id.toString() === id);
-         return f && f.department === faculty.department;
-       }).length;
-       if (sameDeptCount >= 2 && !isDemand) return false;
+       if (reservedSet.has(fId)) return false;
        const fDuties = allDuties.filter(d => d.facultyId.toString() === fId);
        if (fDuties.some(d => d.examDate === examDate && d.examSession === session)) return false;
        if (previouslyAssignedIds.has(fId) && !isDemand) return false;
@@ -456,9 +465,6 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
      };
 
      const hallsWithStudentsInSession = new Set(assignments.map(a => a.hallId.toString()));
-     const globalAssignedInSession = new Set();
-     const allocationWarnings = [];
-     const sessionFacultyAssignments = [];
 
      // Clear old transient Hall facultyAssigned for selected halls
      const selectedHallIds = halls.map(h => h._id);
@@ -467,33 +473,24 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
        { $set: { facultyAssigned: [] } }
      );
 
-     for (const hall of halls) {
-       if (!hallsWithStudentsInSession.has(hall._id.toString())) {
-         continue;
-       }
-       const required = hall.facultyRequired || 1;
-       const hallAssignedIds = [];
-       for (let i = 0; i < required; i++) {
-         let selected = null;
-         for (const faculty of shuffledFaculty) {
-           const fId = faculty._id.toString();
-           if (globalAssignedInSession.has(fId)) continue;
-           if (isFacultyAvailable(faculty, hallAssignedIds)) { selected = faculty; break; }
-         }
-         if (selected) {
-           const fId = selected._id.toString();
-           hallAssignedIds.push(fId);
-           globalAssignedInSession.add(fId);
-           allAssignedFacultyIds.add(fId);
-         } else {
-           allocationWarnings.push(`Hall ${hall.name}: No faculty found`);
-         }
-       }
-       
-       sessionFacultyAssignments.push({
-         hallId: hall._id,
-         facultyIds: hallAssignedIds
-       });
+     // Fairness: fewer total duties first (saved duties + ones handed out earlier in this run)
+     const dutyCounts = { ...baseDutyCounts };
+     runDuties.forEach(d => { dutyCounts[String(d.facultyId)] = (dutyCounts[String(d.facultyId)] || 0) + 1; });
+
+     const allocation = allocateFaculty({
+       halls: halls
+         .filter(h => hallsWithStudentsInSession.has(h._id.toString()))
+         .map(h => ({ hallId: h._id, hallName: h.name, required: h.facultyRequired || 1 })),
+       faculty: shuffledFaculty,
+       isEligible: isFacultyAvailable,
+       dutyCounts,
+       demandIds: demandFacultyIds,
+     });
+     const sessionFacultyAssignments = allocation.facultyAssignments;
+     sessionFacultyAssignments.forEach(fa => fa.facultyIds.forEach(id => allAssignedFacultyIds.add(id)));
+     const allocationWarnings = allocation.vacancies.map(v => `${examDate} ${session} - Hall ${v.hallName}: No faculty found (Need ${v.required}, got ${v.assigned})`);
+     if (allocation.vacancies.length) {
+       planVacancies.push({ planType: 'internal', planId: examSessionDoc._id, examDate, session, vacancies: allocation.vacancies });
      }
 
      // Save to ExamSession
@@ -521,7 +518,9 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
     skipped: skippedCount,
     shortage: hasShortage,
     allocationWarnings: globalAllocationWarnings,
-    facultySuggestions
+    facultySuggestions,
+    planVacancies,
+    vacancyMessage: vacancyMessage(planVacancies.flatMap(p => p.vacancies))
   };
 }
 

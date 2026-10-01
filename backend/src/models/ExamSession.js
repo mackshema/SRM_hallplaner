@@ -5,9 +5,16 @@ const examSessionSchema = new mongoose.Schema(
         examDate: { type: String, required: true },
         examSession: { type: String, enum: ["FN", "AN"], required: true },
         examTime: { type: String, required: true },
-        status: { type: String, enum: ["DRAFT", "FINAL"], default: "DRAFT" },
+        status: { type: String, enum: ["DRAFT", "FINAL", "SCHEDULED", "PUBLISHED"], default: "DRAFT" },
         finalizedAt: Date,
         isPublished: { type: Boolean, default: false },
+        publish_at: { type: Date, default: null }, // IST scheduled publish timestamp
+        // Exam timing (set from the publish dialog). Null = no live status / absentee upload yet.
+        start_at: { type: Date, default: null },
+        end_at: { type: Date, default: null },
+        absentee_window_minutes: { type: Number, default: null }, // null = Settings default
+        // Exam schedule / cycle this plan belongs to (IAT1, IAT2, Model, Anna...)
+        examScheduleId: { type: mongoose.Schema.Types.ObjectId, ref: "ExamSchedule", default: null },
         // Configuration specific to this session
         activeHalls: [{ type: mongoose.Schema.Types.ObjectId, ref: "Hall" }],
         activeDepartments: [{ type: String }],
