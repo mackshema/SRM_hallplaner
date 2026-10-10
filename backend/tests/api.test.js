@@ -234,8 +234,8 @@ async function run() {
     if (r.status === 201) created++;
   }
   check('FAC-01', `All ${facultyRows.length} valid faculty from 03_Faculty.xlsx are created`, created === facultyRows.length, `${created} created`);
-  r = await api('POST', '/users', { token: admin, body: { name: 'Ramesh Kumar', username: 'facx01', password: 'x', role: 'faculty', department: 'CSE' } });
-  check('FAC-02', 'Faculty name must be "<initial>. <name>"', r.status === 400, r.data?.message);
+  r = await api('POST', '/users', { token: admin, body: { name: '', username: 'facx01', password: 'x', role: 'faculty', department: 'CSE' } });
+  check('FAC-02', 'Empty faculty name is rejected', r.status === 400, r.data?.message);
   r = await api('POST', '/users', { token: admin, body: { name: 'Z. Someone', username: 'fac001', password: 'x', role: 'faculty', department: 'CSE' } });
   check('FAC-03', 'Duplicate username (case-insensitive) is rejected', r.status === 400, r.data?.message);
   r = await api('POST', '/users', { token: admin, body: { name: facultyRows[1].Name, username: 'FACX09', password: 'x', role: 'faculty', department: 'CSE' } });

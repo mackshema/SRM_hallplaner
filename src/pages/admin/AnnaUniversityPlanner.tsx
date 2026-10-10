@@ -115,16 +115,6 @@ const AnnaUniversityPlanner = () => {
       return;
     }
 
-    const nameRegex = /^.+\.\s*.+$/;
-    if (!nameRegex.test(newFacultyForm.name)) {
-      toast({
-        title: "Invalid Name Format",
-        description: "Name must include initial and full name (Example: R. Kumar).",
-        variant: "destructive"
-      });
-      return;
-    }
-
     setCreatingInstantFaculty(true);
     try {
       const res = await fetch(`${API_URL}/users`, {

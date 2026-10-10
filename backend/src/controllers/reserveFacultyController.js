@@ -21,6 +21,10 @@ const EXAM_TYPE = { internal: "Internal", anna: "Anna" };
 
 const requirePlanFromQuery = async (req, res) => {
     const { planType, planId } = { ...req.query, ...req.body };
+    if (planType === "anna") {
+        res.status(400).json({ error: "Reserve faculty is not applicable for Anna University examinations." });
+        return null;
+    }
     const plan = await loadPlan(planType, planId);
     if (!plan) {
         res.status(404).json({ error: "Exam plan not found. Pick the exam first." });
@@ -31,49 +35,33 @@ const requirePlanFromQuery = async (req, res) => {
 
 /**
  * GET /api/reserve-faculty/sessions
- * All exam plans (Internal and Anna University) with their reserve counts.
+ * All Internal exam plans with their reserve counts (Anna University is not applicable).
  */
 export const getReserveSessions = async (req, res) => {
     try {
-        const [internalSessions, annaSessions, reserveCounts] = await Promise.all([
+        const [internalSessions, reserveCounts] = await Promise.all([
             ExamSession.find().select("examDate examSession examTime status isPublished publish_at examScheduleId").sort({ examDate: -1, examSession: 1 }).lean(),
-            AnnaSeating.find().select("examDate session status isPublished publish_at examScheduleId").sort({ examDate: -1, session: 1 }).lean(),
             ReserveFaculty.aggregate([
-                { $match: { status: "reserve" } },
+                { $match: { status: "reserve", examType: "Internal" } },
                 { $group: { _id: { examDate: "$examDate", session: "$examSession", examType: "$examType" }, n: { $sum: 1 } } },
             ]),
         ]);
         const countOf = (examDate, session, examType) =>
             reserveCounts.find((c) => c._id.examDate === examDate && c._id.session === session && c._id.examType === examType)?.n || 0;
 
-        const sessions = [
-            ...internalSessions.map((s) => ({
-                id: String(s._id),
-                planType: "internal",
-                planId: String(s._id),
-                examDate: s.examDate,
-                session: s.examSession,
-                examTime: s.examTime,
-                examType: "Internal",
-                status: s.status,
-                isPublished: s.isPublished,
-                publish_at: s.publish_at,
-                reserveCount: countOf(s.examDate, s.examSession, "Internal"),
-            })),
-            ...annaSessions.map((a) => ({
-                id: String(a._id),
-                planType: "anna",
-                planId: String(a._id),
-                examDate: a.examDate,
-                session: a.session,
-                examTime: annaExamTime(a.session),
-                examType: "Anna",
-                status: a.status,
-                isPublished: a.isPublished,
-                publish_at: a.publish_at,
-                reserveCount: countOf(a.examDate, a.session, "Anna"),
-            })),
-        ].sort((a, b) => b.examDate.localeCompare(a.examDate) || a.session.localeCompare(b.session) * -1);
+        const sessions = internalSessions.map((s) => ({
+            id: String(s._id),
+            planType: "internal",
+            planId: String(s._id),
+            examDate: s.examDate,
+            session: s.examSession,
+            examTime: s.examTime,
+            examType: "Internal",
+            status: s.status,
+            isPublished: s.isPublished,
+            publish_at: s.publish_at,
+            reserveCount: countOf(s.examDate, s.examSession, "Internal"),
+        })).sort((a, b) => b.examDate.localeCompare(a.examDate) || a.session.localeCompare(b.session) * -1);
 
         res.json(sessions);
     } catch (error) {

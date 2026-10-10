@@ -11,12 +11,14 @@ async function run() {
   await User.deleteMany({}); // Clear existing users to prevent conflicts
   
   const salt = await bcrypt.genSalt(10);
+  const hashedAdminPassword = await bcrypt.hash("Admin@12345678", salt);
+  const hashedFacultyPassword = await bcrypt.hash("srm@123456789", salt);
   const hashedStudentPassword = await bcrypt.hash("student123", salt);
 
   const users = [
-      { name: "Admin User", username: "SRM@Admin", password: "Admin@12345678", role: "admin" },
-      { name: "Faculty User", username: "faculty@1234", password: "srm@123456789", role: "faculty" },
-      { name: "Demo Student", username: "911123149001", password: hashedStudentPassword, role: "student", email: "student@example.com" }
+      { name: "Admin User", username: "SRM@Admin", password: hashedAdminPassword, plainPassword: "Admin@12345678", role: "admin" },
+      { name: "Faculty User", username: "faculty@1234", password: hashedFacultyPassword, plainPassword: "srm@123456789", role: "faculty" },
+      { name: "Demo Student", username: "911123149001", password: hashedStudentPassword, plainPassword: "student123", role: "student", email: "student@example.com" }
   ];
 
   await User.insertMany(users);

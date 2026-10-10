@@ -23,12 +23,13 @@ import {
 } from "@/components/ui/table";
 import { db, Hall, User, ExamSession } from "@/lib/db";
 import { toast } from "@/components/ui/use-toast";
-import { FileDown, Pencil, Eye, ChevronsUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { FileDown, Pencil, Eye, ChevronsUpDown, ChevronUp, ChevronDown, Upload, X } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Search } from "lucide-react";
 import FacultyDutyHistory from "@/components/FacultyDutyHistory";
+import ExcelUploadHelper from "@/components/ExcelUploadHelper";
 
 // ─── Designation hierarchy config ────────────────────────────────────────────
 // Edit this ONE place to adjust rank order. Lower index = higher rank.
@@ -54,6 +55,9 @@ const FacultyManagement = () => {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isViewOpen, setIsViewOpen] = useState(false);
+  const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [facultyFile, setFacultyFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Selection State
   const [selectedFaculty, setSelectedFaculty] = useState<User | null>(null);
@@ -66,6 +70,7 @@ const FacultyManagement = () => {
     designation: "",
     facultyEmail: "",
     hodEmail: "",
+    regNo: "",
   });
 
   // Saved (finalized) hall duties, for the faculty-hall allocation report
@@ -136,6 +141,7 @@ const FacultyManagement = () => {
         role: 'faculty',
         department: formData.department,
         designation: formData.designation,
+        regNo: formData.regNo || undefined,
         facultyEmail: formData.facultyEmail,
         hodEmail: formData.hodEmail,
       });
@@ -147,7 +153,7 @@ const FacultyManagement = () => {
         description: `${newFaculty.name} has been added successfully.\nUsername: ${username}\nPassword: ${password}`,
       });
 
-      setFormData({ name: "", department: "", designation: "", facultyEmail: "", hodEmail: "" });
+      setFormData({ name: "", department: "", designation: "", facultyEmail: "", hodEmail: "", regNo: "" });
       setIsAddOpen(false);
     } catch (error) {
       console.error("Error adding faculty:", error);
@@ -156,6 +162,44 @@ const FacultyManagement = () => {
         description: error instanceof Error ? error.message : "An error occurred while adding the faculty member.",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleBulkUploadFaculty = async () => {
+    if (!facultyFile) return;
+    setIsUploading(true);
+    try {
+      const uploadData = new FormData();
+      uploadData.append("file", facultyFile);
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_URL}/users/bulk-upload`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: uploadData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to upload faculty Excel sheet.");
+      }
+      toast({
+        title: "Faculty Upload Successful",
+        description: data.message || `Processed ${data.totalProcessed || data.faculty?.length || 0} faculty entries.`,
+      });
+      setIsBulkOpen(false);
+      setFacultyFile(null);
+      const updatedList = await db.getAllFaculty();
+      setFaculty(updatedList);
+    } catch (err) {
+      console.error("Bulk upload faculty error:", err);
+      toast({
+        title: "Upload Failed",
+        description: err instanceof Error ? err.message : "Failed to process faculty Excel file.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -169,6 +213,7 @@ const FacultyManagement = () => {
       designation: member.designation || "",
       facultyEmail: member.facultyEmail || "",
       hodEmail: member.hodEmail || "",
+      regNo: member.regNo || "",
     });
     setIsEditOpen(true);
   };
@@ -184,6 +229,7 @@ const FacultyManagement = () => {
         name: formData.name,
         department: formData.department,
         designation: formData.designation,
+        regNo: formData.regNo || undefined,
         facultyEmail: formData.facultyEmail,
         hodEmail: formData.hodEmail,
       });
@@ -395,9 +441,70 @@ const FacultyManagement = () => {
             Export Allocation
           </Button>
 
+          {/* Bulk Upload Faculty Dialog */}
+          <Dialog open={isBulkOpen} onOpenChange={setIsBulkOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
+                <Upload className="mr-2 h-4 w-4 text-blue-600" />
+                Upload Faculty List
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Bulk Upload Faculty List</DialogTitle>
+                <DialogDescription>
+                  Upload an Excel sheet (.xlsx, .xls) containing faculty members with their Staff Reg No, name, department, designation, and email ID.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-3">
+                <ExcelUploadHelper
+                  templateMode="facultyList"
+                  templateFilename="Faculty_List_Template.xlsx"
+                  note="Columns: Sl. No, Staff Reg No, Faculty Name, Department, Designation, Faculty Email ID (and optional HOD Email ID)."
+                />
+
+                <div className="space-y-2 pt-2">
+                  <Label>Select Excel File</Label>
+                  <div className="flex items-center gap-3">
+                    {facultyFile ? (
+                      <div className="flex items-center gap-2 border rounded-md px-3 py-2 flex-grow bg-slate-50">
+                        <span className="text-sm truncate flex-grow font-medium text-slate-700">
+                          {facultyFile.name} (Ready to upload)
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setFacultyFile(null)}
+                          className="h-6 w-6 text-slate-500 hover:text-red-500"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <Input
+                        type="file"
+                        accept=".xlsx, .xls"
+                        className="flex-grow"
+                        onChange={(e) => setFacultyFile(e.target.files?.[0] || null)}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setIsBulkOpen(false); setFacultyFile(null); }}>
+                  Cancel
+                </Button>
+                <Button onClick={handleBulkUploadFaculty} disabled={!facultyFile || isUploading}>
+                  {isUploading ? "Uploading..." : "Upload & Save Faculty"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
-              <Button onClick={() => setFormData({ name: "", department: "", designation: "", facultyEmail: "", hodEmail: "" })}>Add Faculty</Button>
+              <Button onClick={() => setFormData({ name: "", department: "", designation: "", facultyEmail: "", hodEmail: "", regNo: "" })}>Add Faculty</Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -408,11 +515,21 @@ const FacultyManagement = () => {
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="name">Faculty Name (Format: Initial. Name)</Label>
+                  <Label htmlFor="regNo">Staff Reg No / ID (Optional)</Label>
+                  <Input
+                    id="regNo"
+                    name="regNo"
+                    placeholder="e.g., FAC001"
+                    value={formData.regNo}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="name">Faculty Name</Label>
                   <Input
                     id="name"
                     name="name"
-                    placeholder="e.g., R. Krishna"
+                    placeholder="e.g., Dr. M. Ananda Kumar, R. Krishna, or Ramesh Kumar"
                     value={formData.name}
                     onChange={handleInputChange}
                   />
@@ -490,11 +607,21 @@ const FacultyManagement = () => {
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="edit-name">Faculty Name (Format: Initial. Name)</Label>
+                  <Label htmlFor="edit-regNo">Staff Reg No / ID (Optional)</Label>
+                  <Input
+                    id="edit-regNo"
+                    name="regNo"
+                    placeholder="e.g., FAC001"
+                    value={formData.regNo}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-name">Faculty Name</Label>
                   <Input
                     id="edit-name"
                     name="name"
-                    placeholder="e.g., R. Krishna"
+                    placeholder="e.g., Dr. M. Ananda Kumar, R. Krishna, or Ramesh Kumar"
                     value={formData.name}
                     onChange={handleInputChange}
                   />
@@ -561,6 +688,10 @@ const FacultyManagement = () => {
               {selectedFaculty && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-muted-foreground">Staff Reg No / ID</Label>
+                      <p className="font-medium font-mono text-blue-900">{selectedFaculty.regNo || "N/A"}</p>
+                    </div>
                     <div>
                       <Label className="text-muted-foreground">Name</Label>
                       <p className="font-medium">{selectedFaculty.name}</p>
@@ -630,6 +761,7 @@ const FacultyManagement = () => {
                   onCheckedChange={toggleAll}
                 />
               </TableHead>
+              <TableHead className="w-[120px]">Staff Reg No</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>
                 <button
@@ -655,7 +787,7 @@ const FacultyManagement = () => {
           <TableBody>
             {filteredFaculty.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                   {searchQuery ? "No faculty found matching your search." : "No faculty members found."}
                 </TableCell>
               </TableRow>
@@ -670,6 +802,9 @@ const FacultyManagement = () => {
                       checked={!!member.isSelectedForGeneration}
                       onCheckedChange={() => toggleSelection(member)}
                     />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs font-semibold text-slate-700">
+                    {member.regNo || "-"}
                   </TableCell>
                   <TableCell className="font-medium">
                     <button className="text-left hover:text-blue-700 hover:underline" onClick={() => handleViewClick(member)} title="View details and exam duties">

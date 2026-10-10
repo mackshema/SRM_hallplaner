@@ -80,6 +80,7 @@ const StudentsManagement = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
+    const [showAllPrograms, setShowAllPrograms] = useState(false);
     
     useEffect(() => {
         setSelectedStudents([]);
@@ -468,7 +469,7 @@ const StudentsManagement = () => {
 
             // Check if multi-section header format exists (Regulation, Year, Branch)
             let isMultiSection = false;
-            for (let r of rows) {
+            for (const r of rows) {
                 if (Array.isArray(r) && r[0] === 'Regulation' && r[1] === 'Year' && r[2] === 'Branch') {
                     isMultiSection = true;
                     break;
@@ -779,46 +780,81 @@ const StudentsManagement = () => {
 
             {breadcrumbs}
 
-            {/* Level 0: Programs */}
+            {/* Level 0: Programs or Blank State */}
             {!selectedProgram && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-                            <LayoutGrid className="h-5 w-5 text-slate-400" />
-                            Academic Programs
-                        </h2>
-                        <Button onClick={() => setIsAddProgramModalOpen(true)} variant="outline" size="sm">
-                            <Plus className="h-4 w-4 mr-2" /> Add Program
-                        </Button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                        {Object.keys(structure).map((program) => (
-                            <Card 
-                                key={program} 
-                                className="cursor-pointer hover:border-primary hover:shadow-md transition-all group duration-300"
-                                onClick={() => setSelectedProgram(program)}
+                !isLoading && students.length === 0 && !showAllPrograms ? (
+                    <div className="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-12 text-center max-w-xl mx-auto shadow-xs space-y-5 animate-in fade-in duration-300">
+                        <div className="mx-auto w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 shadow-xs">
+                            <Users className="h-8 w-8" />
+                        </div>
+                        <div className="space-y-1.5">
+                            <h3 className="text-xl font-bold text-slate-800">No Student Details Uploaded Yet</h3>
+                            <p className="text-slate-500 text-sm max-w-md mx-auto">
+                                No student records have been uploaded to the database yet. You can upload your student rosters via Excel or tap below to add student records manually.
+                            </p>
+                        </div>
+                        <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center items-center">
+                            <Button onClick={openAddModal} className="w-full sm:w-auto shadow-sm">
+                                <Plus className="mr-2 h-4 w-4" /> Tap to Add Student
+                            </Button>
+                            <Button 
+                                variant="outline" 
+                                onClick={() => setIsGlobalUploadOpen(true)} 
+                                className="w-full sm:w-auto border-blue-200 text-blue-700 hover:bg-blue-50"
                             >
-                                <CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-3 relative">
-                                    <Button 
-                                        variant="ghost" 
-                                        size="icon" 
-                                        className="absolute top-2 right-2 h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        onClick={(e) => handleDeleteProgram(e, program)}
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                    <div className="p-4 bg-slate-50 rounded-full group-hover:bg-primary/10 transition-colors">
-                                        <GraduationCap className="h-8 w-8 text-slate-400 group-hover:text-primary transition-colors" />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-semibold text-lg text-slate-800">{program}</h3>
-                                        <p className="text-sm text-slate-500">{Object.keys(structure[program]).length} Categories</p>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        ))}
+                                <Upload className="mr-2 h-4 w-4 text-blue-600" /> Upload via Excel
+                            </Button>
+                        </div>
+                        <div className="pt-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowAllPrograms(true)}
+                                className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-4"
+                            >
+                                View / Configure Academic Programs Structure ({Object.keys(structure).length})
+                            </button>
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+                                <LayoutGrid className="h-5 w-5 text-slate-400" />
+                                Academic Programs
+                            </h2>
+                            <Button onClick={() => setIsAddProgramModalOpen(true)} variant="outline" size="sm">
+                                <Plus className="h-4 w-4 mr-2" /> Add Program
+                            </Button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                            {Object.keys(structure).map((program) => (
+                                <Card 
+                                    key={program} 
+                                    className="cursor-pointer hover:border-primary hover:shadow-md transition-all group duration-300"
+                                    onClick={() => setSelectedProgram(program)}
+                                >
+                                    <CardContent className="p-6 flex flex-col items-center justify-center text-center h-full gap-3 relative">
+                                        <Button 
+                                            variant="ghost" 
+                                            size="icon" 
+                                            className="absolute top-2 right-2 h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => handleDeleteProgram(e, program)}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                        <div className="p-4 bg-slate-50 rounded-full group-hover:bg-primary/10 transition-colors">
+                                            <GraduationCap className="h-8 w-8 text-slate-400 group-hover:text-primary transition-colors" />
+                                        </div>
+                                        <div>
+                                            <h3 className="font-semibold text-lg text-slate-800">{program}</h3>
+                                            <p className="text-sm text-slate-500">{Object.keys(structure[program]).length} Categories</p>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </div>
+                    </div>
+                )
             )}
 
             {/* Level 1: Degrees/Years */}

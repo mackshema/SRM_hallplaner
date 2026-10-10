@@ -6,7 +6,7 @@ import Hall from '../models/Hall.js';
 import User from '../models/User.js';
 import FacultyDuty from '../models/FacultyDuty.js';
 import { deleteSessionDuties, compareSessions, previousSession, dutiesFromAssignments } from '../utils/facultyDuties.js';
-import { timetableEntryFromRow, validateTimetable, timetableErrorResponse, applyTimetable, parseRawTimetableLines } from '../utils/timetableImport.js';
+import { timetableEntryFromRow, validateTimetable, timetableErrorResponse, applyTimetable, parseRawTimetableLines, parseWorkbookTimetable } from '../utils/timetableImport.js';
 import { isLocked } from '../utils/planStatus.js';
 import { afterPlansDeleted } from '../services/planLifecycle.js';
 import { allocateFaculty, vacancyMessage } from '../utils/facultyAllocation.js';
@@ -64,9 +64,7 @@ export const uploadTimetable = async (req, res) => {
       updates = req.body.timetable;
     } else {
       const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-      updates = data.map(timetableEntryFromRow);
+      updates = parseWorkbookTimetable(workbook);
     }
 
     // Validate everything before touching the database

@@ -389,16 +389,6 @@ const SeatingPlans = () => {
       return;
     }
 
-    const nameRegex = /^.+\.\s*.+$/;
-    if (!nameRegex.test(newFacultyForm.name)) {
-      toast({
-        title: "Invalid Name Format",
-        description: "Name must include initial and full name (Example: R. Kumar).",
-        variant: "destructive"
-      });
-      return;
-    }
-
     setCreatingInstantFaculty(true);
     try {
       const added = await db.addFaculty({
@@ -696,15 +686,9 @@ const SeatingPlans = () => {
             </CardHeader>
             <CardContent className="space-y-4">
               <ExcelUploadHelper
-                columns={[
-                  { header: "Subject Code", example: "CS3401",      required: true, description: "Subject code" },
-                  { header: "Year",         example: "Year 2",  required: true, description: "Student year/batch" },
-                  { header: "Department",   example: "CSE",          required: true, description: "Dept abbreviation" },
-                  { header: "Date",         example: "2025-04-15",   required: true, description: "YYYY-MM-DD" },
-                  { header: "Session",      example: "FN",           required: true, description: "FN or AN" },
-                ]}
-                templateFilename="Internal_Timetable_Template.xlsx"
-                note="Each row = one subject for one dept on one date. Add one row per subject-dept combination."
+                templateMode="iatTimetable"
+                templateFilename="IAT_Timetable_Schedule_Template.xlsx"
+                note="Upload the official IAT Schedule Excel sheet (Matrix with Dates as columns, or Tabular with Subject Code, Year, Dept, Date, Session). Both formats are supported."
               />
               <div className="flex gap-4 items-center">
                 {timetableFile ? (

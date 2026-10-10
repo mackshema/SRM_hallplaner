@@ -129,10 +129,12 @@ const ReserveFacultyPage: React.FC = () => {
       const res = await fetch(`${API_URL}/reserve-faculty/sessions`);
       if (res.ok) {
         const data: ExamSessionItem[] = await res.json();
-        setSessions(data);
-        if (data.length > 0 && !selectedSessionId) {
-          setSelectedSessionId(data[0].id);
-          setSelectedSession(data[0]);
+        // Reserve faculty is only applicable for Internal exams, not Anna University
+        const internalOnly = data.filter(s => s.examType !== "Anna" && s.planType !== "anna");
+        setSessions(internalOnly);
+        if (internalOnly.length > 0 && !selectedSessionId) {
+          setSelectedSessionId(internalOnly[0].id);
+          setSelectedSession(internalOnly[0]);
         }
       }
     } catch (err) {
@@ -326,7 +328,7 @@ const ReserveFacultyPage: React.FC = () => {
             Reserve Faculty Management
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            Assign and manage standby reserve faculty for exam sessions. Standby reserves can quickly replace absent invigilators.
+            Assign and manage standby reserve faculty for Internal Assessment Test (IAT) sessions. Standby reserves can quickly replace absent invigilators. (Note: Reserve faculty is not applicable for Anna University exams).
           </p>
         </div>
         <Button

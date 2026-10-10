@@ -146,6 +146,30 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
 
   // Header with Logos if provided
   if (leftLogo || rightLogo) {
+    const parseImg = (dataUrl?: string) => {
+      if (!dataUrl) return null;
+      try {
+        const match = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+        let type: "png" | "jpg" | "gif" = "png";
+        let b64 = dataUrl;
+        if (match) {
+          const t = match[1].toLowerCase();
+          type = (t === "jpeg" || t === "jpg") ? "jpg" : (t === "gif" ? "gif" : "png");
+          b64 = match[2];
+        } else if (dataUrl.includes(",")) {
+          b64 = dataUrl.split(",")[1];
+        }
+        const binary = atob(b64);
+        const data = Uint8Array.from(binary, c => c.charCodeAt(0));
+        return { data, type };
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const leftImg = parseImg(leftLogo);
+    const rightImg = parseImg(rightLogo);
+
     children.push(
       new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
@@ -163,20 +187,16 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
               new TableCell({
                 width: { size: 15, type: WidthType.PERCENTAGE },
                 children: [
-                  leftLogo ? (() => {
-                    try {
-                      return new Paragraph({
-                        children: [
-                          new ImageRun({
-                            data: Uint8Array.from(atob(leftLogo.split(",")[1]), c => c.charCodeAt(0)),
-                            transformation: { width: 60, height: 60 },
-                            type: "png"
-                          })
-                        ],
-                        alignment: AlignmentType.LEFT
-                      });
-                    } catch (e) { return new Paragraph(""); }
-                  })() : new Paragraph(""),
+                  leftImg ? new Paragraph({
+                    children: [
+                      new ImageRun({
+                        data: leftImg.data,
+                        transformation: { width: 60, height: 60 },
+                        type: leftImg.type
+                      })
+                    ],
+                    alignment: AlignmentType.LEFT
+                  }) : new Paragraph(""),
                 ],
               }),
               new TableCell({
@@ -200,20 +220,16 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
               new TableCell({
                 width: { size: 15, type: WidthType.PERCENTAGE },
                 children: [
-                  rightLogo ? (() => {
-                    try {
-                      return new Paragraph({
-                        children: [
-                          new ImageRun({
-                            data: Uint8Array.from(atob(rightLogo.split(",")[1]), c => c.charCodeAt(0)),
-                            transformation: { width: 60, height: 60 },
-                            type: "png"
-                          })
-                        ],
-                        alignment: AlignmentType.RIGHT
-                      });
-                    } catch (e) { return new Paragraph(""); }
-                  })() : new Paragraph(""),
+                  rightImg ? new Paragraph({
+                    children: [
+                      new ImageRun({
+                        data: rightImg.data,
+                        transformation: { width: 60, height: 60 },
+                        type: rightImg.type
+                      })
+                    ],
+                    alignment: AlignmentType.RIGHT
+                  }) : new Paragraph(""),
                 ],
               }),
             ],
@@ -329,6 +345,8 @@ export async function exportTableAsDoc(options: ExportWordOptions) {
       headers: safeHeaders,
       rows: safeRows,
       footerText,
+      leftLogo,
+      rightLogo,
     });
   }
 }
@@ -343,8 +361,10 @@ async function exportHtmlFallback(data: {
   headers: string[];
   rows: string[][];
   footerText?: string;
+  leftLogo?: string;
+  rightLogo?: string;
 }) {
-  const { filename, title, generatedOn, headers, rows, footerText } = data;
+  const { filename, title, generatedOn, headers, rows, footerText, leftLogo, rightLogo } = data;
 
   const html = `
 <!doctype html>
@@ -355,10 +375,19 @@ async function exportHtmlFallback(data: {
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid #000; padding: 6px; }
   th { background: #f2f2f2; }
+  .header-table { border: none; margin-bottom: 20px; }
+  .header-table td { border: none; padding: 4px; text-align: center; }
 </style>
 </head>
 <body>
-<h1>${title}</h1>
+${leftLogo || rightLogo ? `
+<table class="header-table" style="width: 100%;">
+  <tr>
+    <td style="width: 20%; text-align: left;">${leftLogo ? `<img src="${leftLogo}" style="max-height: 70px; max-width: 120px;" />` : ''}</td>
+    <td style="width: 60%; text-align: center;"><h2>${title.replace(/\n/g, '<br/>')}</h2></td>
+    <td style="width: 20%; text-align: right;">${rightLogo ? `<img src="${rightLogo}" style="max-height: 70px; max-width: 120px;" />` : ''}</td>
+  </tr>
+</table>` : `<h1>${title.replace(/\n/g, '<br/>')}</h1>`}
 ${generatedOn ? `<p>Generated on: ${generatedOn}</p>` : ""}
 <table>
   <thead>

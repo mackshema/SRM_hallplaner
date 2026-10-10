@@ -14,6 +14,7 @@ export interface User {
   role: 'admin' | 'faculty';
   department?: string;
   designation?: string;
+  regNo?: string;
   facultyEmail?: string;
   hodEmail?: string;
   isSelected?: boolean;

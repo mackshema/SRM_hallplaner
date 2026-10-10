@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema(
       type: String, 
       enum: ["Assistant Professor", "Associate Professor", "Professor", "HOD", ""]
     },
+    regNo: { type: String }, // Staff / Faculty Register Number / Employee ID
     facultyEmail: { type: String },
     hodEmail: { type: String },
     // New Generation Fields for Faculty

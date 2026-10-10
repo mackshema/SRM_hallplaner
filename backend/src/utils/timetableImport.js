@@ -1,3 +1,5 @@
+import xlsx from 'xlsx';
+
 /**
  * Shared timetable import logic for the Internal and Anna University modules.
  *
@@ -35,6 +37,119 @@ export const timetableEntryFromRow = (row) => ({
   department: row['Department'] || row['department'],
   year: row['Year'] || row['year'] || row['Degree'] || row['degree'],
 });
+
+/**
+ * Parses an entire Excel workbook containing either:
+ * 1) Matrix timetable format (e.g. IAT - I Schedule prototype with Dept/Year rows and Date columns)
+ * 2) Tabular format (Subject Code, Date, Session, Department, Year)
+ */
+export const parseWorkbookTimetable = (workbook) => {
+  const matrixEntries = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+
+    const rawRows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (!rawRows || rawRows.length === 0) continue;
+
+    let globalSession = 'FN';
+    let headerRowIdx = -1;
+    let deptColIdx = 0;
+    let yearColIdx = 1;
+    const dateCols = [];
+
+    // 1. Scan for session and table header
+    for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
+      const row = rawRows[r];
+      if (!Array.isArray(row)) continue;
+      const rowText = row.join(' ');
+      if (rowText.toUpperCase().includes('SESSION') || rowText.toUpperCase().includes('FORENOON') || rowText.toUpperCase().includes('AFTERNOON')) {
+        const parsedSess = normalizeSession(rowText);
+        if (parsedSess) globalSession = parsedSess;
+      }
+
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] || '').trim().toLowerCase();
+        if (cell.includes('department') || cell.includes('dept') || cell.includes('branch') || cell.includes('date / department')) {
+          headerRowIdx = r;
+          deptColIdx = c;
+          break;
+        }
+      }
+      if (headerRowIdx !== -1) break;
+    }
+
+    if (headerRowIdx !== -1) {
+      const headerRow = rawRows[headerRowIdx];
+      // Find Year col
+      for (let c = 0; c < headerRow.length; c++) {
+        const cell = String(headerRow[c] || '').trim().toLowerCase();
+        if (c !== deptColIdx && (cell.includes('year') || cell.includes('degree') || cell.includes('sem'))) {
+          yearColIdx = c;
+          break;
+        }
+      }
+
+      // Identify Date columns
+      for (let c = 0; c < headerRow.length; c++) {
+        if (c === deptColIdx || c === yearColIdx) continue;
+        const cellVal = headerRow[c];
+        if (cellVal !== undefined && cellVal !== '' && cellVal !== null) {
+          const dateStr = normalizeDate(cellVal);
+          if (dateStr && dateStr.length >= 8) {
+            dateCols.push({ colIdx: c, date: dateStr });
+          }
+        }
+      }
+
+      if (dateCols.length > 0) {
+        // Parse matrix rows
+        for (let r = headerRowIdx + 1; r < rawRows.length; r++) {
+          const row = rawRows[r];
+          if (!row || !Array.isArray(row) || row.length === 0) continue;
+          const deptVal = String(row[deptColIdx] || '').trim();
+          if (!deptVal) continue;
+          
+          const rowUpper = row.join(' ').toUpperCase();
+          if (rowUpper.includes('COORDINATOR') || rowUpper.includes('PRINCIPAL') || rowUpper.includes('COPY TO') || rowUpper.includes('NOTICE')) {
+            continue;
+          }
+
+          const yearVal = String(row[yearColIdx] || '').trim();
+
+          dateCols.forEach(({ colIdx, date }) => {
+            const subjectCode = String(row[colIdx] || '').trim();
+            if (subjectCode && subjectCode !== '-' && subjectCode !== '--' && subjectCode.toUpperCase() !== 'N/A' && subjectCode.toUpperCase() !== 'NIL') {
+              matrixEntries.push({
+                subjectCode: subjectCode.toUpperCase(),
+                department: deptVal,
+                year: yearVal,
+                examDate: date,
+                session: globalSession
+              });
+            }
+          });
+        }
+      }
+    }
+  }
+
+  if (matrixEntries.length > 0) {
+    return matrixEntries;
+  }
+
+  // Fallback to tabular sheet_to_json across sheets
+  const tabularEntries = [];
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const data = xlsx.utils.sheet_to_json(sheet);
+    if (data && data.length > 0) {
+      tabularEntries.push(...data.map(timetableEntryFromRow));
+    }
+  }
+  return tabularEntries;
+};
 
 /**
  * Validates and normalizes timetable entries.

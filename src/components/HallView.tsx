@@ -383,9 +383,9 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
   const getExportMetadata = () => {
     const contextDateIsDefault = examDate === new Date().toISOString().split("T")[0];
 
-    let finalDate = hall?.examDate || "";
-    let finalSession = hall?.examSession || "";
-    let finalTime = hall?.examTime || "";
+    const finalDate = hall?.examDate || "";
+    const finalSession = hall?.examSession || "";
+    const finalTime = hall?.examTime || "";
 
     // Return whatever is there, preserving empty state instead of hiding it behind defaults
     return {

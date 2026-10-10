@@ -82,13 +82,17 @@ export const exportBenchLayoutWordDoc = async ({
                                 children: [
                                     headerSettings.leftLogo ? (() => {
                                         try {
+                                          const raw = headerSettings.leftLogo;
+                                          const match = raw.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+                                          const t = match ? match[1].toLowerCase() : "png";
+                                          const imgType = (t === "jpeg" || t === "jpg") ? "jpg" : (t === "gif" ? "gif" : "png");
+                                          const b64 = match ? match[2] : (raw.includes(",") ? raw.split(",")[1] : raw);
                                           return new Paragraph({
                                               children: [
-                                                  // @ts-ignore
                                                   new ImageRun({
-                                                      data: Uint8Array.from(atob(headerSettings.leftLogo.split(",")[1]), c => c.charCodeAt(0)),
+                                                      data: Uint8Array.from(atob(b64), c => c.charCodeAt(0)),
                                                       transformation: { width: 80, height: 80 },
-                                                      type: "png"
+                                                      type: imgType as any
                                                   })
                                               ],
                                               alignment: AlignmentType.LEFT
@@ -136,13 +140,17 @@ export const exportBenchLayoutWordDoc = async ({
                                 children: [
                                     headerSettings.rightLogo ? (() => {
                                         try {
+                                          const raw = headerSettings.rightLogo;
+                                          const match = raw.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+                                          const t = match ? match[1].toLowerCase() : "png";
+                                          const imgType = (t === "jpeg" || t === "jpg") ? "jpg" : (t === "gif" ? "gif" : "png");
+                                          const b64 = match ? match[2] : (raw.includes(",") ? raw.split(",")[1] : raw);
                                           return new Paragraph({
                                               children: [
-                                                  // @ts-ignore
                                                   new ImageRun({
-                                                      data: Uint8Array.from(atob(headerSettings.rightLogo.split(",")[1]), c => c.charCodeAt(0)),
+                                                      data: Uint8Array.from(atob(b64), c => c.charCodeAt(0)),
                                                       transformation: { width: 80, height: 80 },
-                                                      type: "png"
+                                                      type: imgType as any
                                                   })
                                               ],
                                               alignment: AlignmentType.RIGHT
@@ -366,7 +374,6 @@ export const exportBenchLayoutWordDoc = async ({
     });
 
     // 4. Seating Layout Grid
-    let seatGrid: string[][];
     let maxRow = hall.rows;
     let maxCol = hall.columns * hall.seatsPerBench; // Approx columns
 
@@ -384,7 +391,7 @@ export const exportBenchLayoutWordDoc = async ({
     }
 
     // Initialize grid with dynamic size
-    seatGrid = Array(maxRow)
+    const seatGrid: string[][] = Array(maxRow)
         .fill(null)
         .map(() => Array(maxCol).fill(""));
 

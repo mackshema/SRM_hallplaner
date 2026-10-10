@@ -14,8 +14,19 @@ export const loginUser = async (req, res) => {
 
         if (user) {
             let isMatch = await bcrypt.compare(password, user.password).catch(() => false);
-            if (!isMatch && user.plainPassword && user.plainPassword === password) {
+            if (!isMatch && (user.password === password || (user.plainPassword && user.plainPassword === password))) {
                 isMatch = true;
+                // Auto-upgrade plain text password to hashed bcrypt password
+                try {
+                    const salt = await bcrypt.genSalt(10);
+                    user.password = await bcrypt.hash(password, salt);
+                    if (!user.plainPassword) {
+                        user.plainPassword = password;
+                    }
+                    await user.save();
+                } catch (e) {
+                    console.error("Error auto-hashing password:", e);
+                }
             }
             if (isMatch) {
                 const token = jwt.sign(

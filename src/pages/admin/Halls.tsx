@@ -10,6 +10,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
   DialogTrigger
 } from "@/components/ui/dialog";
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { X, FileSpreadsheet } from "lucide-react";
 import * as XLSX from 'xlsx';
+import ExcelUploadHelper from "@/components/ExcelUploadHelper";
 import {
   Table,
   TableBody,
@@ -80,6 +82,11 @@ const HallsManagement = () => {
   const [isNewFloorDialogOpen, setIsNewFloorDialogOpen] = useState(false);
   const [newFloorName, setNewFloorName] = useState("");
   const [newFloorError, setNewFloorError] = useState("");
+
+  // Bulk upload modal state
+  const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [hallFile, setHallFile] = useState<File | null>(null);
+  const [isUploadingHalls, setIsUploadingHalls] = useState(false);
 
   const fetchFloors = async () => {
     try {
@@ -359,8 +366,10 @@ const HallsManagement = () => {
     }
   };
 
-  const handleExcelUpload = async (file: File) => {
+  const handleBulkUploadHalls = async () => {
+    if (!hallFile) return;
     const reader = new FileReader();
+    setIsUploadingHalls(true);
     reader.onload = async (e) => {
       try {
         const data = e.target?.result;
@@ -375,21 +384,46 @@ const HallsManagement = () => {
         }
 
         // Validate and format
-        const formattedHalls = json.map((row: any) => ({
-          name: String(row.Name || row.name || row.HallNumber || row['Hall Number'] || ""),
-          rows: Number(row.Rows || row.rows || 0),
-          columns: Number(row.Columns || row.columns || 0),
-          seatsPerBench: Number(row.SeatsPerBench || row['Seats Per Bench'] || 1),
-          floor: String(row.Floor || row.floor || "Ground Floor"),
-          facultyRequired: Number(row.FacultyRequired || row['Faculty Required'] || 1)
-        })).filter(h => h.name && h.rows > 0 && h.columns > 0);
+        const formattedHalls = json.map((row: any) => {
+          const name = String(
+            row['Hall number'] || row['Hall Number'] || row['Hall Name'] ||
+            row['Hall No'] || row['Hall no'] || row.HallNumber || row.Name || row.name || ""
+          ).trim();
+
+          const floor = String(row.Floor || row.floor || "Ground Floor").trim();
+          let capacity = Number(row['Hall Capacity'] || row['Hall capacity'] || row.HallCapacity || row.Capacity || row.capacity || 0);
+          let rows = Number(row.Rows || row.rows || 0);
+          let columns = Number(row.Columns || row.columns || 0);
+          let seatsPerBench = Number(row['Seats Per Bench'] || row['Seats per bench'] || row.SeatsPerBench || row.seatsPerBench || (name.toUpperCase().includes("DH") ? 1 : 2));
+          const facultyRequired = Number(row['Faculty Required'] || row['Faculty required'] || row.FacultyRequired || row.facultyRequired || 1);
+
+          if (name.toUpperCase().includes("DH")) {
+            seatsPerBench = 1;
+          }
+
+          // If rows or columns not provided, derive from capacity
+          if ((!rows || !columns) && capacity > 0) {
+            columns = name.toUpperCase().includes("DH") ? 5 : 3;
+            rows = Math.ceil(capacity / (columns * seatsPerBench));
+          } else if (rows > 0 && columns > 0 && !capacity) {
+            capacity = rows * columns * seatsPerBench;
+          }
+
+          return {
+            name,
+            rows: rows || 5,
+            columns: columns || 3,
+            seatsPerBench: seatsPerBench || 1,
+            floor: floor || "Ground Floor",
+            facultyRequired: facultyRequired || 1
+          };
+        }).filter(h => h.name && h.rows > 0 && h.columns > 0);
 
         if (formattedHalls.length === 0) {
-          toast({ title: "Error", description: "No valid hall data found in Excel", variant: "destructive" });
+          toast({ title: "Error", description: "No valid hall data found in Excel. Ensure Hall number and Floor/Capacity are provided.", variant: "destructive" });
           return;
         }
 
-        setLoading(true);
         const res = await fetch(`${API_URL}/halls/bulk-create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -409,18 +443,21 @@ const HallsManagement = () => {
 
         toast({
           title: "Upload Successful",
-          description: `Created ${result.created} halls. ${result.errors.length} errors.`,
-          variant: result.errors.length > 0 ? "default" : "default"
+          description: `Created ${result.created || 0} halls. ${result.errors?.length || 0} errors or duplicates.`,
+          variant: "default"
         });
+
+        setIsBulkOpen(false);
+        setHallFile(null);
 
       } catch (error) {
         console.error("Excel upload error:", error);
         toast({ title: "Upload Failed", description: "An error occurred while processing the Excel file.", variant: "destructive" });
       } finally {
-        setLoading(false);
+        setIsUploadingHalls(false);
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsBinaryString(hallFile);
   };
 
   if (loading) {
@@ -645,22 +682,65 @@ const HallsManagement = () => {
           </div>
 
           <div className="flex gap-2">
-            <Button variant="outline" className="flex gap-2" asChild>
-              <label className="cursor-pointer">
-                <FileSpreadsheet className="h-4 w-4" />
-                Excel Upload
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".xlsx, .xls, .csv"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleExcelUpload(file);
-                    e.target.value = ''; // Reset
-                  }}
-                />
-              </label>
-            </Button>
+            <Dialog open={isBulkOpen} onOpenChange={setIsBulkOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
+                  <FileSpreadsheet className="mr-2 h-4 w-4 text-blue-600" />
+                  Excel Upload
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Bulk Upload Exam Halls</DialogTitle>
+                  <DialogDescription>
+                    Upload an Excel sheet (.xlsx, .xls) containing hall number, floor, capacity, and faculty required.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-3">
+                  <ExcelUploadHelper
+                    templateMode="hallsList"
+                    templateFilename="Exam_Halls_Template.xlsx"
+                    note="Columns: Serial No, Floor, Hall number, Hall Capacity, Faculty Required (optional: Rows, Columns, Seats Per Bench)."
+                  />
+
+                  <div className="space-y-2 pt-2">
+                    <Label>Select Excel File</Label>
+                    <div className="flex items-center gap-3">
+                      {hallFile ? (
+                        <div className="flex items-center gap-2 border rounded-md px-3 py-2 flex-grow bg-slate-50">
+                          <span className="text-sm truncate flex-grow font-medium text-slate-700">
+                            {hallFile.name} (Ready to upload)
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setHallFile(null)}
+                            className="h-6 w-6 text-slate-500 hover:text-red-500"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Input
+                          type="file"
+                          accept=".xlsx, .xls, .csv"
+                          className="flex-grow"
+                          onChange={(e) => setHallFile(e.target.files?.[0] || null)}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => { setIsBulkOpen(false); setHallFile(null); }}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleBulkUploadHalls} disabled={!hallFile || isUploadingHalls}>
+                    {isUploadingHalls ? "Uploading..." : "Upload & Save Halls"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <Dialog open={open} onOpenChange={(val) => {
               setOpen(val);
               if (!val) resetForm();

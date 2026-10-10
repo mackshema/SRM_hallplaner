@@ -88,7 +88,7 @@ const AdminDashboard = () => {
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
                   <Link to="/admin/reserve-faculty">
-                    <UserCheck className="h-4 w-4 text-indigo-600" />
+                    <UserCheck className="h-4 w-4" />
                     <span>Reserve Faculty</span>
                   </Link>
                 </SidebarMenuButton>
@@ -96,7 +96,7 @@ const AdminDashboard = () => {
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
                   <Link to="/admin/duty-summary">
-                    <BarChart3 className="h-4 w-4 text-indigo-600" />
+                    <BarChart3 className="h-4 w-4" />
                     <span>Duty Summary</span>
                   </Link>
                 </SidebarMenuButton>
