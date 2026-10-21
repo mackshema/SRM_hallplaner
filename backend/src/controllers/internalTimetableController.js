@@ -335,59 +335,93 @@ async function runInternalGeneration(demandFacultyIdsInput = []) {
        }
 
        const batchDeptIds = Array.from(hallBatch.keys()).filter(d => hallBatch.get(d).length > 0);
-       const singleDept = batchDeptIds.length === 1;
-       const grid = Array(hall.rows + 1).fill(null).map(() => Array(hall.columns * hall.seatsPerBench + 1).fill(null));
+        const singleDept = batchDeptIds.length === 1;
+        const grid = Array(hall.rows + 1).fill(null).map(() => Array(hall.columns * hall.seatsPerBench + 1).fill(null));
 
-       const tryPlace = (dId, gridX, gridY, seat, benchPos1Dept) => {
-         if (seat > 1 && benchPos1Dept === dId) return false;
-         if (gridX > 1 && grid[gridY][gridX - 1] === dId) return false;
-         if (gridY > 1 && grid[gridY - 1][gridX] === dId) return false;
-         return true;
-       };
+        const tryPlace = (dId, gridX, gridY, seat) => {
+          // Rule 1: bench-mate: seat-2 dept != seat-1 dept on the same bench at this row
+          if (seat > 1) {
+            const benchMateDept = grid[gridY][(Math.floor((gridX - 1) / hall.seatsPerBench)) * hall.seatsPerBench + 1];
+            if (benchMateDept && benchMateDept !== '__EMPTY__' && benchMateDept === dId) return false;
+          }
+          // Rule 2: left neighbor (across aisle or neighboring bench)
+          if (gridX > 1 && grid[gridY][gridX - 1] === dId) return false;
+          // Rule 3: right neighbor guard
+          if (gridX < hall.columns * hall.seatsPerBench && grid[gridY][gridX + 1] === dId) return false;
+          // Vertical: students of the same department sit one behind another down the column (no zigzag)
+          return true;
+        };
 
-       const getStudentFromDept = (dId) => {
-         const bQueue = hallBatch.get(dId);
-         if (bQueue && bQueue.length > 0) return bQueue.shift();
-         if (deptQueues[dId] && deptQueues[dId].length > 0) return deptQueues[dId].shift();
-         return null;
-       };
+        const getStudentFromDept = (dId) => {
+          const bQueue = hallBatch.get(dId);
+          if (bQueue && bQueue.length > 0) return bQueue.shift();
+          if (deptQueues[dId] && deptQueues[dId].length > 0) return deptQueues[dId].shift();
+          return null;
+        };
 
-       for (let row = 1; row <= hall.rows; row++) {
-         for (let col = 1; col <= hall.columns; col++) {
-           let benchPos1Dept = null;
-           for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
-             const gridX = (col - 1) * hall.seatsPerBench + seat;
-             const gridY = row;
-             if (singleDept && seat > 1) {
-               grid[gridY][gridX] = '__EMPTY__';
-               continue;
-             }
-             let placed = false;
-             const globalExtras = shuffledDeptIds.filter(d => !batchDeptIds.includes(d) && deptQueues[d].length > 0);
-             const candidateDepts = [...batchDeptIds, ...globalExtras];
-             for (let i = 0; i < candidateDepts.length; i++) {
-               const dId = candidateDepts[i];
-               if (!tryPlace(dId, gridX, gridY, seat, benchPos1Dept)) continue;
-               const roll = getStudentFromDept(dId);
-               if (roll === null) continue;
-               if (!hallBatch.has(dId)) hallBatch.set(dId, []);
-               grid[gridY][gridX] = dId;
-               if (seat === 1) benchPos1Dept = dId;
-               assignments.push({
-                 hallId: hall._id,
-                 row, column: col, benchPosition: seat,
-                 studentRollNumber: roll, departmentId: dId,
-                 examDate, examSession: session, examTime: examSessionDoc.examTime,
-                 examSessionId: examSessionDoc._id,
-               });
-               placed = true; break;
-             }
-             if (!placed) grid[gridY][gridX] = '__EMPTY__';
-           }
-         }
-       }
+        // Straight column-first seating: students sit behind each other down each column
+        for (let col = 1; col <= hall.columns; col++) {
+          for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
+            const gridX = (col - 1) * hall.seatsPerBench + seat;
 
-       if (hall.extraBenches && hall.extraBenches.length > 0) {
+            // Single department: only seat 1 of each bench is used
+            if (singleDept && seat > 1) {
+              for (let row = 1; row <= hall.rows; row++) {
+                grid[row][gridX] = '__EMPTY__';
+              }
+              continue;
+            }
+
+            const globalExtras = shuffledDeptIds.filter(d => !batchDeptIds.includes(d) && deptQueues[d].length > 0);
+            const candidateDepts = [...batchDeptIds, ...globalExtras];
+
+            // Determine preferred department for this column
+            let chosenDept = null;
+            for (const dId of candidateDepts) {
+              const hasStudents = (hallBatch.get(dId)?.length > 0) || (deptQueues[dId]?.length > 0);
+              if (!hasStudents) continue;
+              if (seat > 1) {
+                const benchMate = grid[1][(col - 1) * hall.seatsPerBench + 1];
+                if (benchMate && benchMate !== '__EMPTY__' && benchMate === dId) continue;
+              }
+              if (gridX > 1) {
+                const leftDept = grid[1][gridX - 1];
+                if (leftDept && leftDept !== '__EMPTY__' && leftDept === dId) continue;
+              }
+              chosenDept = dId;
+              break;
+            }
+
+            // Place students row by row down this column (sitting behind and behind)
+            for (let row = 1; row <= hall.rows; row++) {
+              let placed = false;
+              const deptsToTry = chosenDept
+                ? [chosenDept, ...candidateDepts.filter(d => d !== chosenDept)]
+                : candidateDepts;
+
+              for (let i = 0; i < deptsToTry.length; i++) {
+                const dId = deptsToTry[i];
+                if (!tryPlace(dId, gridX, row, seat)) continue;
+                const roll = getStudentFromDept(dId);
+                if (roll === null) continue;
+                if (!hallBatch.has(dId)) hallBatch.set(dId, []);
+                grid[row][gridX] = dId;
+                assignments.push({
+                  hallId: hall._id,
+                  row, column: col, benchPosition: seat,
+                  studentRollNumber: roll, departmentId: dId,
+                  examDate, examSession: session, examTime: examSessionDoc.examTime,
+                  examSessionId: examSessionDoc._id,
+                });
+                placed = true;
+                break;
+              }
+              if (!placed) grid[row][gridX] = '__EMPTY__';
+            }
+          }
+        }
+
+        if (hall.extraBenches && hall.extraBenches.length > 0) {
          for (const bench of hall.extraBenches) {
            let extraBenchPos1Dept = null;
            for (let seat = 1; seat <= hall.seatsPerBench; seat++) {

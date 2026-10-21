@@ -470,7 +470,7 @@ async function run() {
   const manualSeats = (await api('GET', `/seating/all?examSessionId=${an9._id}`, { token: admin })).data.assignments;
   check('GEN-04', 'Manual "Generate" follows the timetable (only the 160 students with an exam in this session)', manualSeats.length === 160, `${manualSeats.length} seated, ${r.data?.unallocated?.length} unallocated`);
   const mv = internalSeatViolations(manualSeats, hallsById);
-  check('GEN-03', 'Manual generate keeps all department adjacency rules', mv.benchMate + mv.horizontal + mv.vertical + mv.dhSecondSeat === 0, JSON.stringify(mv));
+  check('GEN-03', 'Manual generate keeps all horizontal department separation rules', mv.benchMate + mv.horizontal + mv.dhSecondSeat === 0, JSON.stringify(mv));
   // A hand-made session with no timetable rows seats every student (600 into 690 seats).
   // The adjacency rules can't use every seat, so some students can't be placed - they
   // must be reported as unallocated, never silently dropped.
@@ -482,7 +482,7 @@ async function run() {
   check('GEN-02', 'Manual "Generate": every student is either seated or listed as unallocated (none silently dropped)', handSeats.length + handUnalloc === studentTotal, `${handSeats.length} seated + ${handUnalloc} unallocated of ${studentTotal}`);
   check('GEN-05', 'A session with no timetable rows still seats every selected student (manual sessions)', handSeats.length > 160, `${handSeats.length} seated`);
   const hv = internalSeatViolations(handSeats, hallsById);
-  check('GEN-06', 'Adjacency rules hold even when halls are nearly full', hv.benchMate + hv.horizontal + hv.vertical + hv.dhSecondSeat + hv.duplicates === 0, JSON.stringify(hv));
+  check('GEN-06', 'Horizontal adjacency rules hold even when halls are nearly full', hv.benchMate + hv.horizontal + hv.dhSecondSeat + hv.duplicates === 0, JSON.stringify(hv));
 
   // ---------------- ANNA ----------------
   section('Anna University exams');

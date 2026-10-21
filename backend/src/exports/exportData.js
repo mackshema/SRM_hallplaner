@@ -130,7 +130,11 @@ const benchLayoutSection = (hall, data) => {
     if (s.isExtraBench) { extras.push(s); return; }
     grid.set(`${s.row}:${(s.column - 1) * hall.seatsPerBench + (s.benchPosition - 1)}`, s);
   });
+  const uniqueDepts = [...new Set(hall.students.map((s) => s.department).filter(Boolean))].sort();
+  const isSingleDept = uniqueDepts.length <= 1;
   const absentCells = [];
+  const boldCells = [];
+  const italicCells = [];
   const rows = [];
   for (let r = 1; r <= hall.rows; r++) {
     const row = { row: r };
@@ -138,6 +142,18 @@ const benchLayoutSection = (hall, data) => {
       const s = grid.get(`${r}:${c}`);
       row[`c${c}`] = s ? (s.isAbsent ? `${s.rollNumber} (ABS)` : s.rollNumber) : "";
       if (s?.isAbsent) absentCells.push({ row: r - 1, key: `c${c}` });
+      if (s?.rollNumber) {
+        if (isSingleDept) {
+          boldCells.push({ row: r - 1, key: `c${c}` });
+        } else {
+          const deptIdx = uniqueDepts.indexOf(s.department);
+          if (deptIdx !== -1 && deptIdx % 2 === 1) {
+            italicCells.push({ row: r - 1, key: `c${c}` });
+          } else {
+            boldCells.push({ row: r - 1, key: `c${c}` });
+          }
+        }
+      }
     }
     rows.push(row);
   }
@@ -154,6 +170,8 @@ const benchLayoutSection = (hall, data) => {
     columns,
     rows,
     absentCells,
+    boldCells,
+    italicCells,
     footer: {
       // Reserve faculty sit opposite the signature line
       left: `Reserve Faculty: ${reserves.length ? reserves.join(", ") : "None assigned"}`,

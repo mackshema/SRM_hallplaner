@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { API_URL } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/table";
 import { db, Hall, User, ExamSession } from "@/lib/db";
 import { toast } from "@/components/ui/use-toast";
-import { FileDown, Pencil, Eye, ChevronsUpDown, ChevronUp, ChevronDown, Upload, X } from "lucide-react";
+import { FileDown, Pencil, Eye, ChevronsUpDown, ChevronUp, ChevronDown, Upload, X, FileSpreadsheet, CheckCircle2, Loader2 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -58,6 +58,8 @@ const FacultyManagement = () => {
   const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [facultyFile, setFacultyFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Selection State
   const [selectedFaculty, setSelectedFaculty] = useState<User | null>(null);
@@ -226,15 +228,15 @@ const FacultyManagement = () => {
       if (!id) return;
 
       const updatedUser = await db.updateFaculty(id, {
-        name: formData.name,
-        department: formData.department,
+        name: formData.name.trim(),
+        department: formData.department.trim(),
         designation: formData.designation,
-        regNo: formData.regNo || undefined,
-        facultyEmail: formData.facultyEmail,
-        hodEmail: formData.hodEmail,
+        regNo: formData.regNo !== undefined ? formData.regNo.trim() : "",
+        facultyEmail: formData.facultyEmail.trim(),
+        hodEmail: formData.hodEmail.trim(),
       });
 
-      setFaculty(faculty.map(f => (f.id === id || f._id === id) ? { ...f, ...updatedUser } : f));
+      setFaculty(faculty.map(f => (f.id === id || f._id === id) ? { ...f, ...updatedUser, regNo: updatedUser.regNo || "" } : f));
 
       toast({
         title: "Faculty Updated",
@@ -442,61 +444,175 @@ const FacultyManagement = () => {
           </Button>
 
           {/* Bulk Upload Faculty Dialog */}
-          <Dialog open={isBulkOpen} onOpenChange={setIsBulkOpen}>
+          <Dialog open={isBulkOpen} onOpenChange={(open) => {
+            setIsBulkOpen(open);
+            if (!open) {
+              setFacultyFile(null);
+              setIsDragging(false);
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }
+          }}>
             <DialogTrigger asChild>
               <Button variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
                 <Upload className="mr-2 h-4 w-4 text-blue-600" />
                 Upload Faculty List
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Bulk Upload Faculty List</DialogTitle>
-                <DialogDescription>
-                  Upload an Excel sheet (.xlsx, .xls) containing faculty members with their Staff Reg No, name, department, designation, and email ID.
-                </DialogDescription>
+            <DialogContent className="max-w-3xl lg:max-w-4xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-blue-100 text-blue-700">
+                    <FileSpreadsheet className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-xl font-bold text-slate-900">Bulk Upload Faculty List</DialogTitle>
+                    <DialogDescription className="text-sm text-slate-500 mt-0.5">
+                      Upload an Excel spreadsheet (.xlsx, .xls) containing faculty members to add or update them in batch.
+                    </DialogDescription>
+                  </div>
+                </div>
               </DialogHeader>
-              <div className="space-y-4 py-3">
+
+              <div className="space-y-4 py-2">
                 <ExcelUploadHelper
                   templateMode="facultyList"
                   templateFilename="Faculty_List_Template.xlsx"
-                  note="Columns: Sl. No, Staff Reg No, Faculty Name, Department, Designation, Faculty Email ID (and optional HOD Email ID)."
+                  note="Mandatory: Faculty Name, Department, Designation & Faculty Email ID. Staff Reg No & HOD Email ID are optional."
                 />
 
-                <div className="space-y-2 pt-2">
-                  <Label>Select Excel File</Label>
-                  <div className="flex items-center gap-3">
-                    {facultyFile ? (
-                      <div className="flex items-center gap-2 border rounded-md px-3 py-2 flex-grow bg-slate-50">
-                        <span className="text-sm truncate flex-grow font-medium text-slate-700">
-                          {facultyFile.name} (Ready to upload)
-                        </span>
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    Select Excel File
+                  </Label>
+                  
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setFacultyFile(file);
+                    }}
+                  />
+
+                  {facultyFile ? (
+                    <div className="flex items-center justify-between p-3.5 border border-emerald-200 bg-emerald-50/50 rounded-xl transition-all">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-lg flex-shrink-0">
+                          <FileSpreadsheet className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-800 truncate max-w-xs sm:max-w-md">
+                              {facultyFile.name}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                              <CheckCircle2 className="h-3 w-3" /> Ready
+                            </span>
+                          </div>
+                          <span className="text-xs text-slate-500">
+                            {(facultyFile.size / 1024).toFixed(1)} KB
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-3">
                         <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-xs h-8 border-slate-300 hover:bg-slate-100"
+                        >
+                          Change
+                        </Button>
+                        <Button
+                          type="button"
                           variant="ghost"
                           size="icon"
-                          onClick={() => setFacultyFile(null)}
-                          className="h-6 w-6 text-slate-500 hover:text-red-500"
+                          onClick={() => {
+                            setFacultyFile(null);
+                            if (fileInputRef.current) fileInputRef.current.value = "";
+                          }}
+                          className="h-8 w-8 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                          title="Remove file"
                         >
                           <X className="h-4 w-4" />
                         </Button>
                       </div>
-                    ) : (
-                      <Input
-                        type="file"
-                        accept=".xlsx, .xls"
-                        className="flex-grow"
-                        onChange={(e) => setFacultyFile(e.target.files?.[0] || null)}
-                      />
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragging(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file && (file.name.endsWith(".xlsx") || file.name.endsWith(".xls"))) {
+                          setFacultyFile(file);
+                        } else {
+                          toast({
+                            title: "Invalid file type",
+                            description: "Please upload an Excel spreadsheet (.xlsx or .xls)",
+                            variant: "destructive",
+                          });
+                        }
+                      }}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`group relative flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
+                        isDragging
+                          ? "border-blue-500 bg-blue-50/70 scale-[0.99]"
+                          : "border-slate-300 hover:border-blue-400 bg-slate-50/60 hover:bg-blue-50/30"
+                      }`}
+                    >
+                      <div className="p-3 bg-white rounded-full shadow-2xs border border-slate-200 group-hover:border-blue-300 group-hover:scale-105 transition-all text-blue-600 mb-2">
+                        <Upload className="h-5 w-5" />
+                      </div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        <span className="text-blue-600 underline-offset-2 hover:underline">Click to browse</span> or drag and drop your Excel file
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Microsoft Excel (.xlsx, .xls) up to 10 MB
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => { setIsBulkOpen(false); setFacultyFile(null); }}>
+
+              <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-slate-100">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsBulkOpen(false);
+                    setFacultyFile(null);
+                  }}
+                  disabled={isUploading}
+                >
                   Cancel
                 </Button>
-                <Button onClick={handleBulkUploadFaculty} disabled={!facultyFile || isUploading}>
-                  {isUploading ? "Uploading..." : "Upload & Save Faculty"}
+                <Button
+                  onClick={handleBulkUploadFaculty}
+                  disabled={!facultyFile || isUploading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white min-w-[170px]"
+                >
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Uploading & Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload & Save Faculty
+                    </>
+                  )}
                 </Button>
               </DialogFooter>
             </DialogContent>

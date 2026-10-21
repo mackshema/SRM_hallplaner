@@ -79,6 +79,8 @@ export const renderExcel = async (doc, { branding, meta }) => {
     header.height = 22;
 
     const absent = new Set((section.absentCells || []).map((a) => `${a.row}:${a.key}`));
+    const boldSet = new Set((section.boldCells || []).map((a) => `${a.row}:${a.key}`));
+    const italicSet = new Set((section.italicCells || []).map((a) => `${a.row}:${a.key}`));
     section.rows.forEach((row, idx) => {
       const excelRow = sheet.getRow(headerRowNumber + 1 + idx);
       section.columns.forEach((c, i) => {
@@ -87,7 +89,14 @@ export const renderExcel = async (doc, { branding, meta }) => {
         cell.value = v === undefined || v === null ? "" : v;
         cell.border = BORDER;
         cell.alignment = { vertical: "top", wrapText: true };
-        if (absent.has(`${idx}:${c.key}`)) cell.font = { color: { argb: "FFC00000" }, bold: true };
+        const cellId = `${idx}:${c.key}`;
+        if (absent.has(cellId)) {
+          cell.font = { color: { argb: "FFC00000" }, bold: true };
+        } else if (italicSet.has(cellId)) {
+          cell.font = { italic: true };
+        } else if (boldSet.has(cellId)) {
+          cell.font = { bold: true };
+        }
       });
     });
     const lastRow = headerRowNumber + section.rows.length;

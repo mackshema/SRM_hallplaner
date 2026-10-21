@@ -68,6 +68,8 @@ export const renderPdf = async (doc, { branding, meta }) => {
     const ctx = { branding, meta, title: doc.title, section };
     const startY = drawHeader(pdf, ctx);
     const absent = new Set((section.absentCells || []).map((a) => `${a.row}:${a.key}`));
+    const boldSet = new Set((section.boldCells || []).map((a) => `${a.row}:${a.key}`));
+    const italicSet = new Set((section.italicCells || []).map((a) => `${a.row}:${a.key}`));
     const dense = section.columns.length > 10;
 
     autoTable(pdf, {

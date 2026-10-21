@@ -473,39 +473,31 @@ export const generateSeatingPlan = async (req, res) => {
 
       const tryPlaceHere = (dId, gridX, gridY, benchPos1Dept, seat, candidateSubjectCode) => {
         // Rule 1 – bench-mate: seat-2 dept ≠ seat-1 dept on the same bench
-        if (seat > 1 && benchPos1Dept === dId) return false;
-        // Rule 2 – left neighbor
+        if (seat > 1 && benchPos1Dept && benchPos1Dept === dId) return false;
+        // Rule 2 – left neighbor (horizontal separation)
         if (gridX > 1 && grid[gridY][gridX - 1] === dId) return false;
-        // Rule 3 – top neighbor (vertical adjacency)
-        if (gridY > 1 && grid[gridY - 1][gridX] === dId) return false;
-        // Rule 4 – bottom neighbor (look-ahead; prevents blocking next row)
-        if (gridY < hall.rows && grid[gridY + 1] && grid[gridY + 1][gridX] === dId) return false;
-        // Rule 5 – right neighbor (already checked by the NEXT seat's rule-2, but guard here)
+        // Rule 3 – right neighbor guard (horizontal separation)
         if (gridX < hall.columns * hall.seatsPerBench && grid[gridY][gridX + 1] === dId) return false;
-        // Rule 6 – blocked dept combinations
+        // Rule 4 – blocked dept combinations horizontally
         if (isPairBlocked) {
           const neighbors = [];
           if (grid[gridY][gridX - 1] && grid[gridY][gridX - 1] !== '__EMPTY__') neighbors.push(grid[gridY][gridX - 1]);
-          if (grid[gridY - 1]?.[gridX] && grid[gridY - 1][gridX] !== '__EMPTY__') neighbors.push(grid[gridY - 1][gridX]);
+          if (grid[gridY][gridX + 1] && grid[gridY][gridX + 1] !== '__EMPTY__') neighbors.push(grid[gridY][gridX + 1]);
           for (const nDept of neighbors) {
             if (isPairBlocked(dId, nDept)) return false;
           }
         }
-        // Rule 7 – AL-05: subject-code separation
-        // If candidate has a known subject code, reject placement if any direct
-        // neighbor (L/R/U/D) already holds the SAME subject code.
-        // Null-safe: skipped when subjectCode is unavailable (legacy sessions).
+        // Rule 5 – subject-code separation horizontally (left/right neighbors)
         if (candidateSubjectCode) {
           const subjectNeighbors = [
             subjectGrid[gridY]?.[gridX - 1],      // left
             subjectGrid[gridY]?.[gridX + 1],      // right
-            subjectGrid[gridY - 1]?.[gridX],      // top
-            subjectGrid[gridY + 1]?.[gridX],      // bottom
           ];
           for (const ns of subjectNeighbors) {
             if (ns && ns === candidateSubjectCode) return false;
           }
         }
+        // Note: Students of the same department sit one behind another down the column (no zigzag)
         return true;
       };
 
@@ -519,47 +511,65 @@ export const generateSeatingPlan = async (req, res) => {
         return null;
       };
 
-      // Fill Regular Seats – row-first (bench as a unit) for proper interleaving
-      for (let row = 1; row <= hall.rows; row++) {
-        for (let col = 1; col <= hall.columns; col++) {
-          let benchPos1Dept = null;
+      // Fill Regular Seats – column-first straight seating (sitting behind and behind and behind)
+      for (let col = 1; col <= hall.columns; col++) {
+        for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
+          const gridX = (col - 1) * hall.seatsPerBench + seat;
 
-          for (let seat = 1; seat <= hall.seatsPerBench; seat++) {
-            const gridX = (col - 1) * hall.seatsPerBench + seat;
-            const gridY = row;
-
-            // Single-dept rule: leave bench position 2+ empty
-            if (singleDept && seat > 1) {
-              grid[gridY][gridX] = '__EMPTY__';
-              continue;
+          // Single-dept rule: leave bench position 2+ empty
+          if (singleDept && seat > 1) {
+            for (let row = 1; row <= hall.rows; row++) {
+              grid[row][gridX] = '__EMPTY__';
             }
+            continue;
+          }
 
+          // Candidate list: batch depts first, then any globally available dept
+          const globalExtras = shuffledDeptIds.filter(
+            d => !batchDeptIds.includes(d) && deptPtrs[d] < deptQueues[d].length // AL-06
+          );
+          const candidateDepts = [...batchDeptIds, ...globalExtras];
+
+          // Determine preferred department for this column
+          let chosenDept = null;
+          for (const dId of candidateDepts) {
+            const hasStudents = (hallBatch.get(dId)?.length > 0) || (deptPtrs[dId] < deptQueues[dId]?.length);
+            if (!hasStudents) continue;
+            if (seat > 1) {
+              const benchMate = grid[1]?.[(col - 1) * hall.seatsPerBench + 1];
+              if (benchMate && benchMate !== '__EMPTY__' && benchMate === dId) continue;
+            }
+            if (gridX > 1) {
+              const leftDept = grid[1]?.[gridX - 1];
+              if (leftDept && leftDept !== '__EMPTY__' && leftDept === dId) continue;
+              if (isPairBlocked && leftDept && isPairBlocked(dId, leftDept)) continue;
+            }
+            chosenDept = dId;
+            break;
+          }
+
+          for (let row = 1; row <= hall.rows; row++) {
+            const benchPos1Dept = seat > 1 ? grid[row]?.[(col - 1) * hall.seatsPerBench + 1] : null;
             let placed = false;
 
-            // Candidate list: batch depts first, then any globally available dept
-            const globalExtras = shuffledDeptIds.filter(
-              d => !batchDeptIds.includes(d) && deptPtrs[d] < deptQueues[d].length // AL-06
-            );
-            const candidateDepts = [...batchDeptIds, ...globalExtras];
+            const deptsToTry = chosenDept
+              ? [chosenDept, ...candidateDepts.filter(d => d !== chosenDept)]
+              : candidateDepts;
 
-            for (let attempt = 0; attempt < candidateDepts.length; attempt++) {
-              const dId = candidateDepts[attempt];
+            for (let attempt = 0; attempt < deptsToTry.length; attempt++) {
+              const dId = deptsToTry[attempt];
 
-              // AL-05: peek at the front roll to get its subjectCode for Rule 7
-              // We peek (not pop) so getStudentFromDeptSC still works normally.
-              // AL-06: use pointer to peek at current front of global queue
               const peekRoll = hallBatch.get(dId)?.[0] ?? deptQueues[dId]?.[deptPtrs[dId]] ?? null;
               const candidateSubjectCode = peekRoll ? (subjectMap[peekRoll] || null) : null;
 
-              if (!tryPlaceHere(dId, gridX, gridY, benchPos1Dept, seat, candidateSubjectCode)) continue;
+              if (!tryPlaceHere(dId, gridX, row, benchPos1Dept, seat, candidateSubjectCode)) continue;
 
               const roll = getStudentFromDeptSC(dId);
               if (roll === null) continue;
 
               if (!hallBatch.has(dId)) hallBatch.set(dId, []);
-              grid[gridY][gridX] = dId;
-              subjectGrid[gridY][gridX] = subjectMap[roll] || null; // AL-05: record subject for future neighbors
-              if (seat === 1) benchPos1Dept = dId;
+              grid[row][gridX] = dId;
+              subjectGrid[row][gridX] = subjectMap[roll] || null;
 
               assignments.push({
                 hallId: hall._id,
@@ -579,23 +589,14 @@ export const generateSeatingPlan = async (req, res) => {
               break;
             }
 
-            // If no dept can be placed without violating rules — leave empty
             if (!placed) {
-              grid[gridY][gridX] = '__EMPTY__';
-              // AL-03: record the deadlocked seat
-              generationWarnings.push({
-                type: 'SEAT_EMPTY',
-                hall: hall.name,
-                row,
-                col,
-                message: `Seat [${row},${col}] in ${hall.name} could not be filled — constraint deadlock`
-              });
+              grid[row][gridX] = '__EMPTY__';
+              deadlockedSeats.push({ hall: hall.name, row, col, seat });
             }
           }
         }
       }
 
-      // Fill Extra Benches (bench-mate + exceptional fill; no grid adjacency for isolated benches)
       if (hall.extraBenches && hall.extraBenches.length > 0) {
         for (const bench of hall.extraBenches) {
           let extraBenchPos1Dept = null;

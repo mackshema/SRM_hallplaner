@@ -53,7 +53,7 @@ export const createUser = async (req, res) => {
             role: role || 'faculty',
             department,
             designation,
-            regNo: regNo?.trim(),
+            regNo: (regNo && String(regNo).trim()) ? String(regNo).trim() : null,
             facultyEmail,
             hodEmail,
             isSelectedForGeneration: true
@@ -70,7 +70,7 @@ export const createUser = async (req, res) => {
                 role: user.role,
                 department: user.department,
                 designation: user.designation,
-                regNo: user.regNo,
+                regNo: user.regNo || null,
                 facultyEmail: user.facultyEmail,
                 hodEmail: user.hodEmail,
             });
@@ -113,7 +113,9 @@ export const updateUser = async (req, res) => {
             user.name = req.body.name || user.name;
             user.department = req.body.department || user.department;
             if (req.body.designation !== undefined) user.designation = req.body.designation;
-            if (req.body.regNo !== undefined) user.regNo = req.body.regNo;
+            if (req.body.regNo !== undefined) {
+                user.regNo = (req.body.regNo && String(req.body.regNo).trim()) ? String(req.body.regNo).trim() : null;
+            }
             if (req.body.facultyEmail !== undefined) user.facultyEmail = req.body.facultyEmail;
             if (req.body.hodEmail !== undefined) user.hodEmail = req.body.hodEmail;
 
@@ -138,7 +140,7 @@ export const updateUser = async (req, res) => {
                 role: updatedUser.role,
                 department: updatedUser.department,
                 designation: updatedUser.designation,
-                regNo: updatedUser.regNo,
+                regNo: updatedUser.regNo || null,
                 facultyEmail: updatedUser.facultyEmail,
                 hodEmail: updatedUser.hodEmail,
                 isSelectedForGeneration: updatedUser.isSelectedForGeneration

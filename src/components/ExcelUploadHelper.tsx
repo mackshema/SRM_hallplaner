@@ -1,7 +1,7 @@
 import React from "react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
-import { Download, Info } from "lucide-react";
+import { Download, Info, FileSpreadsheet } from "lucide-react";
 
 export interface ColumnSpec {
   header: string;
@@ -114,21 +114,26 @@ const ExcelUploadHelper: React.FC<ExcelUploadHelperProps> = ({
   };
 
   return (
-    <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 space-y-2.5 text-sm">
+    <div className="rounded-xl border border-slate-200/90 bg-slate-50/70 p-4 space-y-3.5 text-sm">
       {/* Header row */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-blue-700 font-semibold">
-          <Info className="h-4 w-4 flex-shrink-0" />
-          Required Excel Format
+      <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 pb-1 border-b border-slate-200/60">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
+            <FileSpreadsheet className="h-4 w-4" />
+          </div>
+          <div>
+            <span className="font-semibold text-slate-800 text-sm">Required Excel Format</span>
+            <span className="block text-[11px] text-slate-500">Ensure spreadsheet columns exactly match this preview</span>
+          </div>
         </div>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-100 hover:border-blue-400 gap-1.5"
+          className="h-8 text-xs font-medium border-blue-200 text-blue-700 bg-white hover:bg-blue-50 hover:text-blue-800 shadow-2xs gap-1.5 flex-shrink-0"
           onClick={handleDownloadTemplate}
         >
-          <Download className="h-3.5 w-3.5" />
+          <Download className="h-3.5 w-3.5 text-blue-600" />
           Download Template
         </Button>
       </div>
@@ -146,35 +151,35 @@ const ExcelUploadHelper: React.FC<ExcelUploadHelperProps> = ({
               <span className="px-1.5 py-0.5 bg-blue-100 rounded border border-blue-200">...</span>
             </span>
           </div>
-          <div className="overflow-x-auto rounded border border-slate-300 bg-white">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-2xs">
             <table className="w-full text-xs border-collapse text-center">
               <thead>
-                <tr className="bg-slate-100 font-bold text-slate-800 border-b border-slate-300">
-                  <th className="border border-slate-300 px-3 py-1 text-center w-1/4">Regulation</th>
-                  <th className="border border-slate-300 px-3 py-1 text-center w-1/4">Year</th>
-                  <th className="border border-slate-300 px-3 py-1 text-center w-2/4">Branch</th>
+                <tr className="bg-slate-100 font-bold text-slate-800 border-b border-slate-200">
+                  <th className="border-r border-slate-200 px-3 py-2 text-center w-1/4 whitespace-nowrap">Regulation</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center w-1/4 whitespace-nowrap">Year</th>
+                  <th className="px-3 py-2 text-center w-2/4 whitespace-nowrap">Branch</th>
                 </tr>
-                <tr className="bg-white text-slate-700 border-b-2 border-slate-400">
-                  <td className="border border-slate-300 px-3 py-1 font-mono">2021</td>
-                  <td className="border border-slate-300 px-3 py-1 font-mono">IV</td>
-                  <td className="border border-slate-300 px-3 py-1 font-mono text-left pl-4">103 - B.E. Civil Engineering</td>
+                <tr className="bg-white text-slate-700 border-b border-slate-200">
+                  <td className="border-r border-slate-200 px-3 py-2 font-mono whitespace-nowrap">2021</td>
+                  <td className="border-r border-slate-200 px-3 py-2 font-mono whitespace-nowrap">IV</td>
+                  <td className="px-3 py-2 font-mono text-left pl-4 whitespace-nowrap">103 - B.E. Civil Engineering</td>
                 </tr>
-                <tr className="bg-slate-100 font-bold text-slate-800 border-b border-slate-300">
-                  <th className="border border-slate-300 px-3 py-1 text-center">S.No.</th>
-                  <th className="border border-slate-300 px-3 py-1 text-center">Register Number</th>
-                  <th className="border border-slate-300 px-3 py-1 text-center">Student Name</th>
+                <tr className="bg-slate-100 font-bold text-slate-800 border-b border-slate-200">
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">S.No.</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">Register Number</th>
+                  <th className="px-3 py-2 text-center whitespace-nowrap">Student Name</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr className="border-b border-slate-200">
-                  <td className="border border-slate-300 px-3 py-1 font-mono text-slate-500">1</td>
-                  <td className="border border-slate-300 px-3 py-1 font-mono font-semibold text-slate-800">911123103001</td>
-                  <td className="border border-slate-300 px-3 py-1 font-medium text-slate-900 text-left pl-4">ARUN KUMAR B</td>
+              <tbody className="divide-y divide-slate-100">
+                <tr className="hover:bg-slate-50/70">
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-slate-500 whitespace-nowrap">1</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono font-semibold text-slate-800 whitespace-nowrap">911123103001</td>
+                  <td className="px-3 py-2 font-medium text-slate-900 text-left pl-4 whitespace-nowrap">ARUN KUMAR B</td>
                 </tr>
-                <tr className="border-b border-slate-200">
-                  <td className="border border-slate-300 px-3 py-1 font-mono text-slate-500">2</td>
-                  <td className="border border-slate-300 px-3 py-1 font-mono font-semibold text-slate-800">911123103003</td>
-                  <td className="border border-slate-300 px-3 py-1 font-medium text-slate-900 text-left pl-4">DURGESH ADITYA V A</td>
+                <tr className="hover:bg-slate-50/70">
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-slate-500 whitespace-nowrap">2</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono font-semibold text-slate-800 whitespace-nowrap">911123103003</td>
+                  <td className="px-3 py-2 font-medium text-slate-900 text-left pl-4 whitespace-nowrap">DURGESH ADITYA V A</td>
                 </tr>
               </tbody>
             </table>
@@ -185,124 +190,144 @@ const ExcelUploadHelper: React.FC<ExcelUploadHelperProps> = ({
           <div className="text-xs font-semibold text-slate-700">
             Official IAT Timetable (Matrix) Format:
           </div>
-          <div className="overflow-x-auto rounded border border-blue-200 bg-white shadow-xs">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-2xs">
             <table className="w-full text-xs border-collapse">
               <thead>
-                <tr className="bg-blue-100/70 text-blue-900 border-b border-blue-200 font-semibold">
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-left">Date / Department</th>
-                  <th className="border-r border-blue-200 px-2 py-1 text-center">Year</th>
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-center">2026-10-13</th>
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-center">2026-10-14</th>
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-center">2026-10-15</th>
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-center">2026-10-16</th>
-                  <th className="px-2.5 py-1 text-center">...</th>
+                <tr className="bg-slate-100/80 text-slate-800 border-b border-slate-200 font-semibold">
+                  <th className="border-r border-slate-200 px-3 py-2 text-left whitespace-nowrap">Date / Department</th>
+                  <th className="border-r border-slate-200 px-2.5 py-2 text-center whitespace-nowrap">Year</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">2026-10-13</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">2026-10-14</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">2026-10-15</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">2026-10-16</th>
+                  <th className="px-3 py-2 text-center whitespace-nowrap">...</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 text-slate-700">
-                <tr className="hover:bg-slate-50">
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-semibold text-blue-900">Civil</td>
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono">I</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">MA25C01</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">UC25H01</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">PH25C01</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">EN25C01</td>
-                  <td className="px-2.5 py-1 text-center font-mono text-slate-400">...</td>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tr className="hover:bg-slate-50/70">
+                  <td className="border-r border-slate-100 px-3 py-2 font-semibold text-blue-900 whitespace-nowrap">Civil</td>
+                  <td className="border-r border-slate-100 px-2.5 py-2 text-center font-mono whitespace-nowrap">I</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">MA25C01</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">UC25H01</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">PH25C01</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">EN25C01</td>
+                  <td className="px-3 py-2 text-center font-mono text-slate-400 whitespace-nowrap">...</td>
                 </tr>
-                <tr className="hover:bg-slate-50">
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-semibold text-blue-900">CSE</td>
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono">I</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">MA25C01</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">UC25H01</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">PH25C01</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono text-center">EN25C01</td>
-                  <td className="px-2.5 py-1 text-center font-mono text-slate-400">...</td>
+                <tr className="hover:bg-slate-50/70">
+                  <td className="border-r border-slate-100 px-3 py-2 font-semibold text-blue-900 whitespace-nowrap">CSE</td>
+                  <td className="border-r border-slate-100 px-2.5 py-2 text-center font-mono whitespace-nowrap">I</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">MA25C01</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">UC25H01</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">PH25C01</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-center whitespace-nowrap">EN25C01</td>
+                  <td className="px-3 py-2 text-center font-mono text-slate-400 whitespace-nowrap">...</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </div>
       ) : activeMode === 'facultyList' ? (
-        <div className="space-y-2">
-          <div className="overflow-x-auto rounded border border-blue-200 bg-white">
+        <div className="space-y-2.5">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-2xs">
             <table className="w-full text-xs border-collapse">
               <thead>
-                <tr className="bg-blue-100/70 text-blue-900 border-b border-blue-200 font-semibold">
-                  <th className="border-r border-blue-200 px-2 py-1 text-center">Sl. No</th>
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-left font-mono">Staff Reg No</th>
-                  <th className="border-r border-blue-200 px-3 py-1 text-left">Faculty Name <span className="text-red-500">*</span></th>
-                  <th className="border-r border-blue-200 px-3 py-1 text-left">Department <span className="text-red-500">*</span></th>
-                  <th className="border-r border-blue-200 px-3 py-1 text-left">Designation <span className="text-red-500">*</span></th>
-                  <th className="border-r border-blue-200 px-3 py-1 text-left">Faculty Email ID <span className="text-red-500">*</span></th>
-                  <th className="px-3 py-1 text-left">HOD Email ID</th>
+                <tr className="bg-slate-100/90 text-slate-800 border-b border-slate-200 font-semibold">
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">Sl. No</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-left font-mono whitespace-nowrap">Staff Reg No</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-left whitespace-nowrap">
+                    Faculty Name <span className="text-red-500 font-bold">*</span>
+                  </th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-left whitespace-nowrap">
+                    Department <span className="text-red-500 font-bold">*</span>
+                  </th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-left whitespace-nowrap">
+                    Designation <span className="text-red-500 font-bold">*</span>
+                  </th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-left whitespace-nowrap">
+                    Faculty Email ID <span className="text-red-500 font-bold">*</span>
+                  </th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">
+                    HOD Email ID <span className="text-slate-400 font-normal text-[11px] ml-1">(Optional)</span>
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 text-slate-700">
-                <tr className="hover:bg-slate-50">
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-400">1</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono font-medium text-slate-700">FAC001</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-medium text-slate-900">Dr. M. Ananda Kumar</td>
-                  <td className="border-r border-slate-200 px-3 py-1">Chemistry</td>
-                  <td className="border-r border-slate-200 px-3 py-1 text-blue-800 font-medium">Associate Professor</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-mono text-slate-600">anandakumar@srm.edu</td>
-                  <td className="px-3 py-1 font-mono text-slate-600">hod.chemistry@srm.edu</td>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tr className="hover:bg-slate-50/70 transition-colors">
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-mono text-slate-400 whitespace-nowrap">1</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono font-medium text-slate-700 whitespace-nowrap">FAC001</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-medium text-slate-900 whitespace-nowrap">Dr. M. Ananda Kumar</td>
+                  <td className="border-r border-slate-100 px-3 py-2 whitespace-nowrap">Chemistry</td>
+                  <td className="border-r border-slate-100 px-3 py-2 whitespace-nowrap">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200/80">
+                      Associate Professor
+                    </span>
+                  </td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-slate-600 whitespace-nowrap">anandakumar@srm.edu</td>
+                  <td className="px-3 py-2 font-mono text-slate-600 whitespace-nowrap">hod.chemistry@srm.edu</td>
                 </tr>
-                <tr className="hover:bg-slate-50">
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-400">2</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 font-mono font-medium text-slate-700">FAC002</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-medium text-slate-900">R. Krishna</td>
-                  <td className="border-r border-slate-200 px-3 py-1">CSE</td>
-                  <td className="border-r border-slate-200 px-3 py-1 text-blue-800 font-medium">Assistant Professor</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-mono text-slate-600">krishna@srm.edu</td>
-                  <td className="px-3 py-1 font-mono text-slate-600">hod.cse@srm.edu</td>
+                <tr className="hover:bg-slate-50/70 transition-colors">
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-mono text-slate-400 whitespace-nowrap">2</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono font-medium text-slate-700 whitespace-nowrap">FAC002</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-medium text-slate-900 whitespace-nowrap">R. Krishna</td>
+                  <td className="border-r border-slate-100 px-3 py-2 whitespace-nowrap">CSE</td>
+                  <td className="border-r border-slate-100 px-3 py-2 whitespace-nowrap">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200/80">
+                      Assistant Professor
+                    </span>
+                  </td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono text-slate-600 whitespace-nowrap">krishna@srm.edu</td>
+                  <td className="px-3 py-2 font-mono text-slate-600 whitespace-nowrap">hod.cse@srm.edu</td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white/80 p-2.5 rounded border border-blue-100">
-            <div>
-              <span className="font-semibold text-blue-900">Staff Reg No:</span> Unique Faculty ID / Register Number (e.g., <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800 font-mono">FAC001</code>, <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800 font-mono">10245</code>).
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
+            <div className="flex items-start gap-1.5">
+              <span className="font-semibold text-slate-800 flex-shrink-0">Staff Reg No:</span>
+              <span>Unique ID or Register Number (e.g., <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800 font-mono text-[10px]">FAC001</code>, <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800 font-mono text-[10px]">10245</code>).</span>
             </div>
-            <div>
-              <span className="font-semibold text-blue-900">Faculty Name:</span> Full faculty name (no compulsory initial format required).
+            <div className="flex items-start gap-1.5">
+              <span className="font-semibold text-slate-800 flex-shrink-0">Designations:</span>
+              <span>Assistant Professor, Associate Professor, Professor, HOD.</span>
             </div>
           </div>
         </div>
       ) : activeMode === 'hallsList' ? (
         <div className="space-y-2">
-          <div className="overflow-x-auto rounded border border-blue-200 bg-white">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-2xs">
             <table className="w-full text-xs border-collapse">
               <thead>
-                <tr className="bg-blue-100/70 text-blue-900 border-b border-blue-200 font-semibold">
-                  <th className="border-r border-blue-200 px-2 py-1 text-center">Serial No</th>
-                  <th className="border-r border-blue-200 px-3 py-1 text-left">Floor <span className="text-red-500">*</span></th>
-                  <th className="border-r border-blue-200 px-3 py-1 text-left font-mono">Hall number <span className="text-red-500">*</span></th>
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-center">Hall Capacity <span className="text-red-500">*</span></th>
-                  <th className="border-r border-blue-200 px-2 py-1 text-center">Rows</th>
-                  <th className="border-r border-blue-200 px-2 py-1 text-center">Columns</th>
-                  <th className="border-r border-blue-200 px-2.5 py-1 text-center">Seats / Bench</th>
-                  <th className="px-2.5 py-1 text-center">Faculty Required</th>
+                <tr className="bg-slate-100/90 text-slate-800 border-b border-slate-200 font-semibold">
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">Serial No</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-left whitespace-nowrap">Floor <span className="text-red-500 font-bold">*</span></th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-left font-mono whitespace-nowrap">Hall number <span className="text-red-500 font-bold">*</span></th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">Hall Capacity <span className="text-red-500 font-bold">*</span></th>
+                  <th className="border-r border-slate-200 px-2.5 py-2 text-center whitespace-nowrap">Rows</th>
+                  <th className="border-r border-slate-200 px-2.5 py-2 text-center whitespace-nowrap">Columns</th>
+                  <th className="border-r border-slate-200 px-3 py-2 text-center whitespace-nowrap">Seats / Bench</th>
+                  <th className="px-3 py-2 text-center whitespace-nowrap">Faculty Required</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 text-slate-700">
-                <tr className="hover:bg-slate-50">
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-400">1</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-medium">Ground Floor</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-mono font-bold text-blue-900">101</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 text-center font-semibold text-slate-800">30</td>
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-500">5</td>
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-500">3</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 text-center font-mono text-slate-500">2</td>
-                  <td className="px-2.5 py-1 text-center font-semibold text-slate-700">1</td>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tr className="hover:bg-slate-50/70 transition-colors">
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-mono text-slate-400 whitespace-nowrap">1</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-medium whitespace-nowrap">Ground Floor</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono font-bold text-blue-900 whitespace-nowrap">101</td>
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-semibold text-slate-800 whitespace-nowrap">30</td>
+                  <td className="border-r border-slate-100 px-2.5 py-2 text-center font-mono text-slate-500 whitespace-nowrap">5</td>
+                  <td className="border-r border-slate-100 px-2.5 py-2 text-center font-mono text-slate-500 whitespace-nowrap">3</td>
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-mono text-slate-500 whitespace-nowrap">2</td>
+                  <td className="px-3 py-2 text-center font-semibold text-slate-700 whitespace-nowrap">1</td>
                 </tr>
-                <tr className="hover:bg-slate-50">
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-400">2</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-medium">Second Floor</td>
-                  <td className="border-r border-slate-200 px-3 py-1 font-mono font-bold text-blue-900">310DH</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 text-center font-semibold text-slate-800">25</td>
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-500">5</td>
-                  <td className="border-r border-slate-200 px-2 py-1 text-center font-mono text-slate-500">5</td>
-                  <td className="border-r border-slate-200 px-2.5 py-1 text-center font-mono text-slate-500">1</td>
-                  <td className="px-2.5 py-1 text-center font-semibold text-slate-700">1</td>
+                <tr className="hover:bg-slate-50/70 transition-colors">
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-mono text-slate-400 whitespace-nowrap">2</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-medium whitespace-nowrap">Second Floor</td>
+                  <td className="border-r border-slate-100 px-3 py-2 font-mono font-bold text-blue-900 whitespace-nowrap">310DH</td>
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-semibold text-slate-800 whitespace-nowrap">25</td>
+                  <td className="border-r border-slate-100 px-2.5 py-2 text-center font-mono text-slate-500 whitespace-nowrap">5</td>
+                  <td className="border-r border-slate-100 px-2.5 py-2 text-center font-mono text-slate-500 whitespace-nowrap">5</td>
+                  <td className="border-r border-slate-100 px-3 py-2 text-center font-mono text-slate-500 whitespace-nowrap">1</td>
+                  <td className="px-3 py-2 text-center font-semibold text-slate-700 whitespace-nowrap">1</td>
                 </tr>
               </tbody>
             </table>
@@ -310,18 +335,18 @@ const ExcelUploadHelper: React.FC<ExcelUploadHelperProps> = ({
         </div>
       ) : (
         /* Column table */
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-2xs">
           <table className="w-full text-xs border-collapse">
             <thead>
-              <tr className="bg-blue-100 text-blue-800">
-                {columns.map((col) => (
+              <tr className="bg-slate-100/90 text-slate-800 border-b border-slate-200">
+                {columns.map((col, idx) => (
                   <th
                     key={col.header}
-                    className="border border-blue-200 px-2 py-1 font-semibold text-left whitespace-nowrap"
+                    className={`px-3 py-2 font-semibold text-left whitespace-nowrap ${idx < columns.length - 1 ? 'border-r border-slate-200' : ''}`}
                   >
                     {col.header}
                     {col.required && (
-                      <span className="text-red-500 ml-0.5">*</span>
+                      <span className="text-red-500 font-bold ml-0.5">*</span>
                     )}
                   </th>
                 ))}
@@ -329,21 +354,21 @@ const ExcelUploadHelper: React.FC<ExcelUploadHelperProps> = ({
             </thead>
             <tbody>
               <tr className="bg-white">
-                {columns.map((col) => (
+                {columns.map((col, idx) => (
                   <td
                     key={col.header}
-                    className="border border-blue-200 px-2 py-1 text-slate-600 font-mono whitespace-nowrap"
+                    className={`px-3 py-2 text-slate-600 font-mono whitespace-nowrap ${idx < columns.length - 1 ? 'border-r border-slate-100' : ''}`}
                   >
                     {col.example}
                   </td>
                 ))}
               </tr>
               {columns.some((c) => c.description) && (
-                <tr className="bg-blue-50/40">
-                  {columns.map((col) => (
+                <tr className="bg-slate-50/50">
+                  {columns.map((col, idx) => (
                     <td
                       key={col.header}
-                      className="border border-blue-100 px-2 py-1 text-slate-400 italic text-[10px] whitespace-nowrap"
+                      className={`px-3 py-2 text-slate-400 italic text-[10px] whitespace-nowrap ${idx < columns.length - 1 ? 'border-r border-slate-100' : ''}`}
                     >
                       {col.description || ""}
                     </td>
@@ -356,9 +381,10 @@ const ExcelUploadHelper: React.FC<ExcelUploadHelperProps> = ({
       )}
 
       {note && (
-        <p className="text-[11px] text-blue-600 italic leading-snug">
-          ⚠ {note}
-        </p>
+        <div className="flex items-start gap-2 text-xs text-slate-600 bg-blue-50/60 border border-blue-200/60 rounded-lg p-2.5 leading-relaxed">
+          <Info className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+          <span>{note}</span>
+        </div>
       )}
     </div>
   );

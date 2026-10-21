@@ -129,7 +129,8 @@ Students with no match in a session aren't seated in it.
 | TT-04 | Every student with an exam in the session gets a seat, as long as there are enough usable seats. | ✅ |
 | SEAT-01 | Students sharing a bench are from different departments. | ✅ |
 | SEAT-02 | Side-by-side seats, including across neighbouring benches, are from different departments. | ✅ |
-| SEAT-03 | Seats directly in front and behind are from different departments. | ✅ |
+| SEAT-03 | Seats directly in front and behind are from the same department (straight column-wise seating; nearby column is another department, not in zigzag). | ✅ |
+| SEAT-03B | Font formatting: single department is all bold; multiple departments alternate (Dept 0 bold, Dept 1 italic, Dept 2 bold...). | ✅ |
 | SEAT-04 | Drawing halls use only seat 1 of each bench. | ✅ |
 | SEAT-05 | No student is seated twice, and every seat is inside the hall grid. | ✅ |
 | 📄 | Each hall aims for a mix of **3 departments**. Departments are shuffled and the starting hall is random, so each generation is different. | |

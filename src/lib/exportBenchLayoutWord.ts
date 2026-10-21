@@ -394,6 +394,9 @@ export const exportBenchLayoutWordDoc = async ({
     const seatGrid: string[][] = Array(maxRow)
         .fill(null)
         .map(() => Array(maxCol).fill(""));
+    const seatGridDepts: string[][] = Array(maxRow)
+        .fill(null)
+        .map(() => Array(maxCol).fill(""));
 
     // Populate grid
     if (seatAssignments && seatAssignments.length > 0) {
@@ -402,9 +405,10 @@ export const exportBenchLayoutWordDoc = async ({
             const r = a.row - 1;
             const c = (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
             if (r >= 0 && c >= 0 && a.studentRollNumber) {
-                // Ensure array bounds (just in case)
                 if (!seatGrid[r]) seatGrid[r] = Array(maxCol).fill("");
+                if (!seatGridDepts[r]) seatGridDepts[r] = Array(maxCol).fill("");
                 seatGrid[r][c] = a.studentRollNumber;
+                seatGridDepts[r][c] = a.departmentId || a.departmentName || "";
             }
         });
     } else {
@@ -414,10 +418,17 @@ export const exportBenchLayoutWordDoc = async ({
                 const seat = seats[r]?.[c];
                 if (seat?.rollNumber) {
                     seatGrid[r][c] = seat.rollNumber;
+                    seatGridDepts[r][c] = seat.departmentId || seat.departmentName || "";
                 }
             }
         }
     }
+
+    // Font rule:
+    // If only 1 department, all students are BOLD (no italics).
+    // If 2+ departments, alternate by department: Dept 0 = BOLD, Dept 1 = ITALIC, etc.
+    const uniqueDepts = Array.from(new Set(seatGridDepts.flat().filter(Boolean))).sort();
+    const isSingleDept = uniqueDepts.length <= 1;
 
     // Identify all columns
     const allColumns: number[] = [];
@@ -471,7 +482,20 @@ export const exportBenchLayoutWordDoc = async ({
         // Roll Numbers
         allColumns.forEach((actualCol) => {
             const rollNumber = seatGrid[r][actualCol] || "";
-            const isBoldColumn = actualCol % 2 === 0;
+            const dept = seatGridDepts[r]?.[actualCol] || "";
+
+            let isBold = true;
+            let isItalic = false;
+            if (rollNumber) {
+                if (isSingleDept) {
+                    isBold = true;
+                    isItalic = false;
+                } else {
+                    const deptIdx = uniqueDepts.indexOf(dept);
+                    isBold = deptIdx === -1 || (deptIdx % 2 === 0);
+                    isItalic = deptIdx !== -1 && (deptIdx % 2 === 1);
+                }
+            }
 
             rowCells.push(
                 new TableCell({
@@ -481,8 +505,8 @@ export const exportBenchLayoutWordDoc = async ({
                             children: [
                                 new TextRun({
                                     text: rollNumber,
-                                    bold: !!rollNumber && isBoldColumn,
-                                    italics: !!rollNumber && !isBoldColumn,
+                                    bold: !!rollNumber && isBold,
+                                    italics: !!rollNumber && isItalic,
                                     size: 14, // 7pt
                                 }),
                             ],

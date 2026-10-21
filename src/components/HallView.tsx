@@ -692,15 +692,20 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
 
       // Collect all roll numbers in column-by-column order (matching seating arrangement)
       const seatGrid: string[][] = Array(hall.rows).fill(null).map(() => Array(hall.columns * hall.seatsPerBench).fill(""));
+      const seatGridDepts: string[][] = Array(hall.rows).fill(null).map(() => Array(hall.columns * hall.seatsPerBench).fill(""));
 
       for (let r = 0; r < hall.rows; r++) {
         for (let c = 0; c < hall.columns * hall.seatsPerBench; c++) {
           const seat = seats[r]?.[c];
           if (seat?.rollNumber) {
             seatGrid[r][c] = seat.rollNumber;
+            seatGridDepts[r][c] = String(seat.departmentId || seat.departmentName || "");
           }
         }
       }
+
+      const uniqueDepts = Array.from(new Set(seatGridDepts.flat().filter(Boolean))).sort();
+      const isSingleDept = uniqueDepts.length <= 1;
 
       // Total columns to show
       const totalColumns = hall.columns * hall.seatsPerBench;
@@ -742,9 +747,13 @@ const HallView = ({ hallId, readOnly = false, examSessionId }: HallViewProps) =>
 
           // Draw roll number if exists
           if (rollNumber) {
-            // Alternate between bold and italic for each column
-            const isBoldColumn = actualCol % 2 === 0;
-            doc.setFont("helvetica", isBoldColumn ? "bold" : "italic");
+            const dept = seatGridDepts[r]?.[actualCol];
+            let isBold = true;
+            if (!isSingleDept) {
+              const deptIdx = uniqueDepts.indexOf(dept);
+              isBold = deptIdx === -1 || (deptIdx % 2 === 0);
+            }
+            doc.setFont("helvetica", isBold ? "bold" : "italic");
             doc.setFontSize(7);
             doc.text(rollNumber, x + cellWidth / 2, y + cellHeight / 2 + 2, {
               align: 'center',

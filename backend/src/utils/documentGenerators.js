@@ -373,15 +373,26 @@ export const generateBenchLayoutDocx = async ({
     const seatGrid = Array(maxRow)
         .fill(null)
         .map(() => Array(maxCol).fill(""));
+    const seatGridAssignments = Array(maxRow)
+        .fill(null)
+        .map(() => Array(maxCol).fill(null));
 
     seatAssignments.forEach(a => {
         const r = a.row - 1;
         const c = (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
         if (r >= 0 && c >= 0 && a.studentRollNumber) {
             if (!seatGrid[r]) seatGrid[r] = Array(maxCol).fill("");
+            if (!seatGridAssignments[r]) seatGridAssignments[r] = Array(maxCol).fill(null);
             seatGrid[r][c] = a.isAbsent ? `${a.studentRollNumber} (ABS)` : a.studentRollNumber;
+            seatGridAssignments[r][c] = a;
         }
     });
+
+    // Font rule:
+    // If only 1 department, all students are BOLD (no italics).
+    // If 2+ departments, alternate by department: Dept 0 = BOLD, Dept 1 = ITALIC, etc.
+    const uniqueDepts = [...new Set(seatAssignments.map(a => a.departmentId).filter(Boolean))].sort();
+    const isSingleDept = uniqueDepts.length <= 1;
 
     const allColumns = [];
     for (let c = 0; c < maxCol; c++) {
@@ -431,8 +442,23 @@ export const generateBenchLayoutDocx = async ({
 
         allColumns.forEach((actualCol) => {
             const rollNumber = seatGrid[r][actualCol] || "";
-            const isBoldColumn = actualCol % 2 === 0;
+            const assignment = seatGridAssignments[r]?.[actualCol];
             const isAbsent = rollNumber.includes("(ABS)");
+
+            let isBold = true;
+            let isItalic = false;
+            if (rollNumber) {
+                if (isSingleDept) {
+                    isBold = true;
+                    isItalic = false;
+                } else {
+                    const dept = assignment?.departmentId;
+                    const deptIdx = uniqueDepts.indexOf(dept);
+                    isBold = deptIdx === -1 || (deptIdx % 2 === 0);
+                    isItalic = deptIdx !== -1 && (deptIdx % 2 === 1);
+                }
+            }
+
             rowCells.push(
                 new TableCell({
                     width: { size: 95 / allColumns.length, type: WidthType.PERCENTAGE },
@@ -442,8 +468,8 @@ export const generateBenchLayoutDocx = async ({
                             children: [
                                 new TextRun({
                                     text: rollNumber,
-                                    bold: !!rollNumber && isBoldColumn,
-                                    italics: !!rollNumber && !isBoldColumn,
+                                    bold: !!rollNumber && isBold,
+                                    italics: !!rollNumber && isItalic,
                                     size: 14, // 7pt
                                     color: isAbsent ? "FF0000" : undefined,
                                 }),
@@ -611,13 +637,19 @@ export const generateAllBenchLayoutsDocx = async ({
             });
         }
 
+        const uniqueDepts = [...new Set(hallAssignments.map(a => a.departmentId).filter(Boolean))].sort();
+        const isSingleDept = uniqueDepts.length <= 1;
+
         const seatGrid = Array(maxRow).fill(null).map(() => Array(maxCol).fill(""));
+        const seatGridAssignments = Array(maxRow).fill(null).map(() => Array(maxCol).fill(null));
         hallAssignments.forEach(a => {
             const r = a.row - 1;
             const c = (a.column - 1) * hall.seatsPerBench + (a.benchPosition - 1);
             if (r >= 0 && c >= 0 && a.studentRollNumber) {
                 if (!seatGrid[r]) seatGrid[r] = Array(maxCol).fill("");
+                if (!seatGridAssignments[r]) seatGridAssignments[r] = Array(maxCol).fill(null);
                 seatGrid[r][c] = a.isAbsent ? `${a.studentRollNumber} (ABS)` : a.studentRollNumber;
+                seatGridAssignments[r][c] = a;
             }
         });
 
@@ -648,15 +680,31 @@ export const generateAllBenchLayoutsDocx = async ({
             }));
             allColumns.forEach((actualCol) => {
                 const rollNumber = seatGrid[r][actualCol] || "";
+                const assignment = seatGridAssignments[r]?.[actualCol];
                 const isAbsent = rollNumber.includes("(ABS)");
+
+                let isBold = true;
+                let isItalic = false;
+                if (rollNumber) {
+                    if (isSingleDept) {
+                        isBold = true;
+                        isItalic = false;
+                    } else {
+                        const dept = assignment?.departmentId;
+                        const deptIdx = uniqueDepts.indexOf(dept);
+                        isBold = deptIdx === -1 || (deptIdx % 2 === 0);
+                        isItalic = deptIdx !== -1 && (deptIdx % 2 === 1);
+                    }
+                }
+
                 rowCells.push(new TableCell({
                     width: { size: colWidth, type: WidthType.PERCENTAGE },
                     shading: isAbsent ? { fill: "FCEBEB" } : undefined,
                     children: [new Paragraph({
                         children: [new TextRun({
                             text: rollNumber,
-                            bold: !!rollNumber && (actualCol % 2 === 0),
-                            italics: !!rollNumber && !(actualCol % 2 === 0),
+                            bold: !!rollNumber && isBold,
+                            italics: !!rollNumber && isItalic,
                             size: 14,
                             color: isAbsent ? "FF0000" : undefined,
                         })],

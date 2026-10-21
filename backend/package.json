@@ -16,7 +16,7 @@
     "restore": "echo 'Usage: mongorestore --db exam_hall_allotment ./backups/<folder>/exam_hall_allotment'",
     "test:api": "node tests/api.test.js",
     "test:data": "node scripts/generate_test_data.js",
-    "test:unit": "node --test tests/facultyAllocation.test.js"
+    "test:unit": "node --test tests/facultyAllocation.test.js tests/internalSeating.test.js"
   },
   "keywords": [],
   "author": "",

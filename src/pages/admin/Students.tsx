@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { API_URL } from "@/lib/api";
 import { 
     Users, Plus, Upload, Trash2, Edit2, Download, AlertCircle, FileSpreadsheet, Loader2, 
-    ChevronRight, Folder, FolderOpen, GraduationCap, LayoutGrid, ArrowLeft
+    ChevronRight, Folder, FolderOpen, FolderPlus, GraduationCap, LayoutGrid, ArrowLeft
 } from "lucide-react";
 import { 
     Card, CardContent, CardDescription, CardHeader, CardTitle 
@@ -40,18 +40,7 @@ interface AcademicStructure {
     };
 }
 
-const defaultStructure: AcademicStructure = {
-    "UG": {
-        "Year 1": [],
-        "Year 2": [],
-        "Year 3": [],
-        "Year 4": []
-    },
-    "PG": {
-        "Year 1": [],
-        "Year 2": []
-    }
-};
+const defaultStructure: AcademicStructure = {};
 
 const StudentsManagement = () => {
     // Structure State
@@ -61,13 +50,13 @@ const StudentsManagement = () => {
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (typeof parsed === 'object' && parsed !== null) {
-                    return { ...defaultStructure, ...parsed };
+                    return parsed;
                 }
             }
         } catch (error) {
             console.error("Failed to parse academic structure", error);
         }
-        return defaultStructure;
+        return {};
     });
 
     // Navigation State
@@ -122,7 +111,7 @@ const StudentsManagement = () => {
         try {
             const res = await fetch(`${API_URL}/student`);
             if (res.ok) {
-                const data = await res.json();
+                const data: Student[] = await res.json();
                 setStudents(data);
             }
         } catch (error) {
@@ -186,12 +175,22 @@ const StudentsManagement = () => {
         toast({ title: "Success", description: "Department added successfully" });
     };
 
-    const handleDeleteProgram = (e: React.MouseEvent, program: string) => {
+    const handleDeleteProgram = async (e: React.MouseEvent, program: string) => {
         e.stopPropagation();
-        if (window.confirm(`Are you sure you want to remove the program "${program}"? Students in this program will not be deleted, but they won't be visible here until the program is added again.`)) {
+        if (window.confirm(`Are you sure you want to delete "${program}"? All students in this category will also be deleted.`)) {
+            const toDelete = students.filter(s => s.program === program);
+            if (toDelete.length > 0) {
+                try {
+                    await Promise.all(toDelete.map(s => fetch(`${API_URL}/student/${s._id}`, { method: "DELETE" })));
+                    setStudents(prev => prev.filter(s => s.program !== program));
+                } catch (err) {
+                    console.error("Error deleting students of program", err);
+                }
+            }
             setStructure(prev => {
                 const updated = { ...prev };
                 delete updated[program];
+                localStorage.setItem("academicStructure_v2", JSON.stringify(updated));
                 return updated;
             });
             if (selectedProgram === program) {
@@ -199,34 +198,62 @@ const StudentsManagement = () => {
                 setSelectedDegree(null);
                 setSelectedDepartment(null);
             }
+            toast({ title: "Category Deleted", description: `"${program}" and associated students removed.` });
         }
     };
 
-    const handleDeleteDegree = (e: React.MouseEvent, degree: string) => {
+    const handleDeleteDegree = async (e: React.MouseEvent, degree: string) => {
         e.stopPropagation();
         if (!selectedProgram) return;
-        if (window.confirm(`Are you sure you want to remove the category "${degree}"? Students won't be deleted.`)) {
+        if (window.confirm(`Are you sure you want to delete "${degree}"? All students in this category will also be deleted.`)) {
+            const toDelete = students.filter(s => s.program === selectedProgram && s.degree === degree);
+            if (toDelete.length > 0) {
+                try {
+                    await Promise.all(toDelete.map(s => fetch(`${API_URL}/student/${s._id}`, { method: "DELETE" })));
+                    setStudents(prev => prev.filter(s => !(s.program === selectedProgram && s.degree === degree)));
+                } catch (err) {
+                    console.error("Error deleting students of degree", err);
+                }
+            }
             setStructure(prev => {
                 const updated = { ...prev };
-                delete updated[selectedProgram][degree];
+                if (updated[selectedProgram]) {
+                    delete updated[selectedProgram][degree];
+                }
+                localStorage.setItem("academicStructure_v2", JSON.stringify(updated));
                 return updated;
             });
             if (selectedDegree === degree) setSelectedDegree(null);
+            toast({ title: "Category Deleted", description: `"${degree}" removed successfully.` });
         }
     };
 
-    const handleDeleteDepartment = (e: React.MouseEvent, dept: string) => {
+    const handleDeleteDepartment = async (e: React.MouseEvent, dept: string) => {
         e.stopPropagation();
         if (!selectedProgram || !selectedDegree) return;
-        if (window.confirm(`Are you sure you want to remove the department "${dept}"? Students will not be deleted.`)) {
-            setStructure(prev => ({
-                ...prev,
-                [selectedProgram]: {
-                    ...prev[selectedProgram],
-                    [selectedDegree]: prev[selectedProgram][selectedDegree].filter(d => d !== dept)
+        if (window.confirm(`Are you sure you want to delete department "${dept}"? All students in this department will also be deleted.`)) {
+            const toDelete = students.filter(s => s.program === selectedProgram && s.degree === selectedDegree && s.department === dept);
+            if (toDelete.length > 0) {
+                try {
+                    await Promise.all(toDelete.map(s => fetch(`${API_URL}/student/${s._id}`, { method: "DELETE" })));
+                    setStudents(prev => prev.filter(s => !(s.program === selectedProgram && s.degree === selectedDegree && s.department === dept)));
+                } catch (err) {
+                    console.error("Error deleting students of department", err);
                 }
-            }));
+            }
+            setStructure(prev => {
+                const updated = {
+                    ...prev,
+                    [selectedProgram]: {
+                        ...prev[selectedProgram],
+                        [selectedDegree]: (prev[selectedProgram][selectedDegree] || []).filter(d => d !== dept)
+                    }
+                };
+                localStorage.setItem("academicStructure_v2", JSON.stringify(updated));
+                return updated;
+            });
             if (selectedDepartment === dept) setSelectedDepartment(null);
+            toast({ title: "Department Deleted", description: `"${dept}" removed successfully.` });
         }
     };
 
@@ -242,7 +269,7 @@ const StudentsManagement = () => {
             name: "", 
             rollNumber: "", 
             email: "", 
-            program: selectedProgram || "UG", 
+            program: selectedProgram || (Object.keys(structure)[0] || ""), 
             degree: selectedDegree || "", 
             department: selectedDepartment || "",
             regulation: "",
@@ -782,20 +809,20 @@ const StudentsManagement = () => {
 
             {/* Level 0: Programs or Blank State */}
             {!selectedProgram && (
-                !isLoading && students.length === 0 && !showAllPrograms ? (
+                Object.keys(structure).length === 0 ? (
                     <div className="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-12 text-center max-w-xl mx-auto shadow-xs space-y-5 animate-in fade-in duration-300">
                         <div className="mx-auto w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 shadow-xs">
-                            <Users className="h-8 w-8" />
+                            <FolderPlus className="h-8 w-8" />
                         </div>
                         <div className="space-y-1.5">
-                            <h3 className="text-xl font-bold text-slate-800">No Student Details Uploaded Yet</h3>
+                            <h3 className="text-xl font-bold text-slate-800">Start by Creating a Program or Department</h3>
                             <p className="text-slate-500 text-sm max-w-md mx-auto">
-                                No student records have been uploaded to the database yet. You can upload your student rosters via Excel or tap below to add student records manually.
+                                No academic categories or departments have been created yet. Start by creating your first program/category, or upload student rosters via Excel to automatically create them.
                             </p>
                         </div>
                         <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center items-center">
-                            <Button onClick={openAddModal} className="w-full sm:w-auto shadow-sm">
-                                <Plus className="mr-2 h-4 w-4" /> Tap to Add Student
+                            <Button onClick={() => setIsAddProgramModalOpen(true)} className="w-full sm:w-auto shadow-sm">
+                                <Plus className="mr-2 h-4 w-4" /> Start: Create Department / Category
                             </Button>
                             <Button 
                                 variant="outline" 
@@ -805,25 +832,16 @@ const StudentsManagement = () => {
                                 <Upload className="mr-2 h-4 w-4 text-blue-600" /> Upload via Excel
                             </Button>
                         </div>
-                        <div className="pt-2">
-                            <button
-                                type="button"
-                                onClick={() => setShowAllPrograms(true)}
-                                className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-4"
-                            >
-                                View / Configure Academic Programs Structure ({Object.keys(structure).length})
-                            </button>
-                        </div>
                     </div>
                 ) : (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
                                 <LayoutGrid className="h-5 w-5 text-slate-400" />
-                                Academic Programs
+                                Academic Programs & Categories
                             </h2>
                             <Button onClick={() => setIsAddProgramModalOpen(true)} variant="outline" size="sm">
-                                <Plus className="h-4 w-4 mr-2" /> Add Program
+                                <Plus className="h-4 w-4 mr-2" /> Add Category / Program
                             </Button>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
